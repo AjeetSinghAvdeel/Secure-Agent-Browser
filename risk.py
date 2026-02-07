@@ -1,5 +1,4 @@
 def calculate_risk(injection, hidden, phishing):
-
     score = 0
     reasons = []
 

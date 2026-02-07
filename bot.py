@@ -6,7 +6,7 @@ def get_html(url):
     options = Options()
     options.add_argument("--start-maximized")
 
-    driver = webdriver.Chrome(options=options)
+    driver = webdriver.Chrome(options=options)  # Selenium Manager auto-handles driver
     driver.get(url)
     time.sleep(3)
 
