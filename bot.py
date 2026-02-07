@@ -8,7 +8,7 @@ def get_html(url):
 
     driver = webdriver.Chrome(options=options)  # Selenium Manager auto-handles driver
     driver.get(url)
-    time.sleep(3)
+    time.sleep(5)
 
     html = driver.page_source
     return driver, html

@@ -3,7 +3,7 @@ import os
 from bot import get_html
 from scanner import scan_page
 
-RISK_THRESHOLD = 70
+RISK_THRESHOLD = 50
 
 
 def run(url):
@@ -20,8 +20,8 @@ def run(url):
     if result["risk"] >= RISK_THRESHOLD:
         print("\n🚨 BLOCKED")
 
-        os.makedirs("../logs", exist_ok=True)
-        driver.save_screenshot("../logs/blocked.png")
+        os.makedirs("logs", exist_ok=True)
+        driver.save_screenshot("logs/blocked.png")
 
     else:
         print("\n✅ SAFE")
