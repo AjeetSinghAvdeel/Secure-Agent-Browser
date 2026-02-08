@@ -1,5 +1,10 @@
-__pycache__/
+# Frontend
+frontend/node_modules/
+
+# Backend
+backend/__pycache__/
 *.pyc
 
-backend/firebase_key.json
-
+# Secrets
+firebase_key.json
+.env
