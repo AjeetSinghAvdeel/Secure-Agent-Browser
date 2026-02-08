@@ -97,10 +97,10 @@ def scan(req: ScanRequest):
         # ----------------------------
         # 🔐 SIMULATED AGENT ACTION
         # ----------------------------
-        agent_action = {
-            "type": "submit_form",
-            "fields": ["username", "password"]
-        }
+        from agent import infer_agent_action
+
+        agent_action = infer_agent_action(result)
+        policy = evaluate_action(agent_action, result)
 
         # ----------------------------
         # 🧠 POLICY EVALUATION

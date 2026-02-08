@@ -24,9 +24,17 @@ export type Scan = {
   status: "safe" | "warning" | "blocked";
   details: any;
 
-  // 🔐 NEW (policy engine)
-  agent_action?: AgentAction;
-  policy?: PolicyDecision;
+  agent_action?: {
+    type: string;
+    fields?: string[];
+    confidence?: string;
+    reason?: string;
+  };
+
+  policy?: {
+    decision: "ALLOW" | "WARN" | "BLOCK";
+    reason: string;
+  };
 };
 
 /* ---------------------------------- */

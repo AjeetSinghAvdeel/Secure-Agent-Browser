@@ -158,6 +158,35 @@ def analyze_network(network, page_url):
 
     return risk, reasons
 
+# -------------------------------
+# 🧠 Agent Context Derivation
+# -------------------------------
+def derive_agent_context(phishing, injection, behavior, network):
+    """
+    Summarize environment for agent decision-making
+    """
+
+    context = {
+        "credential_surface": bool(phishing),
+        "language_manipulation": bool(injection),
+        "runtime_manipulation": False,
+        "data_exfiltration": False,
+    }
+
+    if behavior:
+        if (
+            behavior.get("clickInterceptors", 0) > 0
+            or behavior.get("eventHijacks", 0) > 0
+        ):
+            context["runtime_manipulation"] = True
+
+    if network:
+        for req in network:
+            if req.get("crossOrigin") and req.get("method") in ("POST", "PUT", "BEACON"):
+                context["data_exfiltration"] = True
+                break
+
+    return context
 
 # -------------------------------
 # Main Scanner
@@ -188,6 +217,9 @@ def scan_page(payload, page_url=None):
         behavior_risk=behavior_risk + network_risk,
         behavior_findings=behavior_reasons + network_reasons,
     )
+    agent_context = derive_agent_context(
+    phishing, injection, behavior, network
+    )
 
     return {
         "injection": injection,
@@ -197,6 +229,7 @@ def scan_page(payload, page_url=None):
         "llm_result": llm_result,
         "behavior": behavior,
         "network": network,
+        "agent_context": agent_context,
         "risk": base_risk,
         "confidence": confidence,
         "reasons": reasons + llm_reasons,

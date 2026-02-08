@@ -1,46 +1,65 @@
 def evaluate_action(action, scan_result):
     """
-    Agent Action Mediation Engine
-
-    action: dict describing agent intent
-    scan_result: full scan output
+    Policy-Governed Agent Decision Engine (Explainable)
     """
 
     risk = scan_result.get("risk", 0)
-    decision = scan_result.get("decision", {})
-    primary_signal = decision.get("primary_signal", "benign")
+    decision_meta = scan_result.get("decision", {})
+    primary_signal = decision_meta.get("primary_signal", "benign")
+
+    explanation = []
+    enforced_action = action["type"]
 
     # -----------------------------
     # HARD BLOCK CONDITIONS
     # -----------------------------
     if risk >= 70:
+        explanation.append("Overall risk score exceeds safe threshold")
+        explanation.append(f"Primary threat signal: {primary_signal}")
+
         return {
             "decision": "BLOCK",
-            "reason": "High-risk malicious environment detected"
+            "enforced_action": "terminate_session",
+            "reason": "High-risk malicious environment detected",
+            "explanation": explanation
         }
 
     if (
         action["type"] == "submit_form"
         and primary_signal == "credential_harvesting"
     ):
+        explanation.append("Agent intended to submit credentials")
+        explanation.append("Site identified as credential harvesting threat")
+
         return {
             "decision": "BLOCK",
-            "reason": "Credential submission on suspected phishing site"
+            "enforced_action": "disable_form_submission",
+            "reason": "Credential submission blocked on phishing site",
+            "explanation": explanation
         }
 
     # -----------------------------
     # WARN CONDITIONS
     # -----------------------------
     if risk >= 40:
+        explanation.append("Suspicious indicators detected")
+        explanation.append("Agent allowed to proceed with caution")
+
         return {
             "decision": "WARN",
-            "reason": "Suspicious activity detected, agent caution advised"
+            "enforced_action": "read_only_mode",
+            "reason": "Suspicious activity detected",
+            "explanation": explanation
         }
 
     # -----------------------------
     # ALLOW
     # -----------------------------
+    explanation.append("No significant malicious indicators detected")
+
     return {
         "decision": "ALLOW",
-        "reason": "No malicious indicators detected"
+        "enforced_action": enforced_action,
+        "reason": "Environment assessed as safe",
+        "explanation": explanation
     }
