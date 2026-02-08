@@ -9,6 +9,7 @@ from bot import get_html
 from scanner import scan_page
 from firebase_client import db
 from firebase_admin import firestore
+from policy_engine import evaluate_action
 
 
 # ----------------------------
@@ -43,7 +44,6 @@ def normalize_url(url: str):
     return url
 
 
-
 # ----------------------------
 # App
 # ----------------------------
@@ -72,12 +72,21 @@ def scan(req: ScanRequest):
     driver = None
 
     try:
+        # ----------------------------
+        # Normalize URL
+        # ----------------------------
         url = normalize_url(req.url)
 
+        # ----------------------------
+        # Load Page + Scan
+        # ----------------------------
         driver, payload = get_html(url)
         raw_result = scan_page(payload, page_url=req.url)
         result = sanitize(raw_result)
 
+        # ----------------------------
+        # Risk → Status
+        # ----------------------------
         risk = int(result["risk"])
         status = (
             "safe" if risk < 40 else
@@ -85,20 +94,40 @@ def scan(req: ScanRequest):
             "blocked"
         )
 
-        # 🔹 Firestore write (Sentinel ONLY here)
+        # ----------------------------
+        # 🔐 SIMULATED AGENT ACTION
+        # ----------------------------
+        agent_action = {
+            "type": "submit_form",
+            "fields": ["username", "password"]
+        }
+
+        # ----------------------------
+        # 🧠 POLICY EVALUATION
+        # ----------------------------
+        policy = evaluate_action(agent_action, result)
+
+        # ----------------------------
+        # 🔹 Firestore write (SINGLE SOURCE)
+        # ----------------------------
         db.collection("scans").add({
             "url": req.url,
             "risk": risk,
             "status": status,
             "details": result,
+            "agent_action": agent_action,
+            "policy": policy,
             "timestamp": firestore.SERVER_TIMESTAMP
         })
 
-        # 🔹 API response (JSON-safe)
+        # ----------------------------
+        # API Response
+        # ----------------------------
         return {
             "url": req.url,
             "risk": risk,
             "status": status,
+            "policy": policy,
             "timestamp": datetime.utcnow().isoformat()
         }
 

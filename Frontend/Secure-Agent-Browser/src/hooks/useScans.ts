@@ -1,6 +1,20 @@
 import { useEffect, useState } from "react";
-import { collection, onSnapshot } from "firebase/firestore";
+import { collection, onSnapshot, orderBy, query } from "firebase/firestore";
 import { db } from "@/lib/firebase";
+
+/* ---------------------------------- */
+/* Types */
+/* ---------------------------------- */
+
+export type AgentAction = {
+  type: string;
+  fields?: string[];
+};
+
+export type PolicyDecision = {
+  decision: "ALLOW" | "WARN" | "BLOCK";
+  reason: string;
+};
 
 export type Scan = {
   id: string;
@@ -9,14 +23,28 @@ export type Scan = {
   risk: number;
   status: "safe" | "warning" | "blocked";
   details: any;
+
+  // 🔐 NEW (policy engine)
+  agent_action?: AgentAction;
+  policy?: PolicyDecision;
 };
+
+/* ---------------------------------- */
+/* Hook */
+/* ---------------------------------- */
 
 export function useScans() {
   const [scans, setScans] = useState<Scan[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const unsub = onSnapshot(collection(db, "scans"), (snap) => {
+    // newest scans first (recommended)
+    const q = query(
+      collection(db, "scans"),
+      orderBy("timestamp", "desc")
+    );
+
+    const unsub = onSnapshot(q, (snap) => {
       const data = snap.docs.map((doc) => ({
         id: doc.id,
         ...(doc.data() as Omit<Scan, "id">),

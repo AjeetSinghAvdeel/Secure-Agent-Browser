@@ -7,10 +7,6 @@ import {
   Ban,
   CheckCircle,
   Search,
-  Brain,
-  Eye,
-  MousePointerClick,
-  FileWarning,
   Filter,
   ChevronDown,
   ChevronUp,
@@ -46,12 +42,6 @@ const statusConfig = {
     color: "text-cyber-danger",
     bg: "bg-cyber-danger/10 border-cyber-danger/30",
   },
-};
-
-const severityColor = {
-  high: "text-cyber-danger",
-  medium: "text-cyber-warning",
-  info: "text-primary",
 };
 
 type StatusFilter = "all" | "safe" | "warning" | "blocked";
@@ -193,19 +183,50 @@ const Dashboard = () => {
 
                       {expanded && (
                         <tr className="bg-secondary/20">
-                          <td colSpan={5} className="px-6 py-4 text-xs">
-                            <p className="font-mono mb-2">
+                          <td colSpan={5} className="px-6 py-4 text-xs space-y-3">
+
+                            {/* Confidence */}
+                            <p className="font-mono">
                               <strong>Confidence:</strong>{" "}
                               {scan.details?.confidence || "unknown"}
                             </p>
 
-                            <ul className="list-disc pl-4 space-y-1">
-                              {scan.details?.reasons?.map(
-                                (r: string, i: number) => (
-                                  <li key={i}>{r}</li>
-                                )
-                              )}
-                            </ul>
+                            {/* 🔐 POLICY DECISION */}
+                            {scan.policy && (
+                              <p className="font-mono">
+                                <strong>Policy Decision:</strong>{" "}
+                                <span className="font-bold">
+                                  {scan.policy.decision}
+                                </span>{" "}
+                                — {scan.policy.reason}
+                              </p>
+                            )}
+
+                            {/* 🤖 AGENT ACTION */}
+                            {scan.agent_action && (
+                              <p className="font-mono">
+                                <strong>Agent Action:</strong>{" "}
+                                {scan.agent_action.type}
+                                {scan.agent_action.fields?.length
+                                  ? ` (${scan.agent_action.fields.join(", ")})`
+                                  : ""}
+                              </p>
+                            )}
+
+                            {/* Reasons */}
+                            <div>
+                              <p className="font-mono mb-1">
+                                <strong>Analysis Reasons:</strong>
+                              </p>
+                              <ul className="list-disc pl-4 space-y-1">
+                                {scan.details?.reasons?.map(
+                                  (r: string, i: number) => (
+                                    <li key={i}>{r}</li>
+                                  )
+                                )}
+                              </ul>
+                            </div>
+
                           </td>
                         </tr>
                       )}
