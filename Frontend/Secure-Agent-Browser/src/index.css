@@ -1,0 +1,127 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Inter:wght@300;400;500;600;700;800&display=swap');
+
+@layer base {
+  :root {
+    --background: 222 30% 6%;
+    --foreground: 210 30% 90%;
+
+    --card: 220 25% 10%;
+    --card-foreground: 210 30% 90%;
+
+    --popover: 220 25% 10%;
+    --popover-foreground: 210 30% 90%;
+
+    --primary: 190 95% 45%;
+    --primary-foreground: 222 30% 6%;
+
+    --secondary: 220 20% 16%;
+    --secondary-foreground: 210 30% 85%;
+
+    --muted: 220 20% 14%;
+    --muted-foreground: 215 15% 55%;
+
+    --accent: 160 95% 45%;
+    --accent-foreground: 222 30% 6%;
+
+    --destructive: 0 80% 55%;
+    --destructive-foreground: 210 40% 98%;
+
+    --border: 220 20% 18%;
+    --input: 220 20% 18%;
+    --ring: 190 95% 45%;
+
+    --radius: 0.75rem;
+
+    /* Custom cyber tokens */
+    --cyber-safe: 160 95% 45%;
+    --cyber-warning: 40 95% 55%;
+    --cyber-danger: 0 80% 55%;
+    --cyber-glow: 190 95% 45%;
+    --cyber-glass: 220 25% 12%;
+    --cyber-glass-border: 220 20% 22%;
+
+    --sidebar-background: 220 25% 8%;
+    --sidebar-foreground: 210 30% 90%;
+    --sidebar-primary: 190 95% 45%;
+    --sidebar-primary-foreground: 222 30% 6%;
+    --sidebar-accent: 220 20% 16%;
+    --sidebar-accent-foreground: 210 30% 90%;
+    --sidebar-border: 220 20% 18%;
+    --sidebar-ring: 190 95% 45%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+  }
+}
+
+@layer utilities {
+  .glass {
+    @apply bg-cyber-glass/60 backdrop-blur-xl border border-cyber-glass-border;
+  }
+
+  .glow-primary {
+    box-shadow: 0 0 20px hsl(var(--primary) / 0.3), 0 0 60px hsl(var(--primary) / 0.1);
+  }
+
+  .glow-safe {
+    box-shadow: 0 0 15px hsl(var(--cyber-safe) / 0.4);
+  }
+
+  .glow-warning {
+    box-shadow: 0 0 15px hsl(var(--cyber-warning) / 0.4);
+  }
+
+  .glow-danger {
+    box-shadow: 0 0 15px hsl(var(--cyber-danger) / 0.4);
+  }
+
+  .text-gradient-cyber {
+    @apply bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent;
+  }
+
+  .cyber-grid {
+    background-image: 
+      linear-gradient(hsl(var(--border) / 0.3) 1px, transparent 1px),
+      linear-gradient(90deg, hsl(var(--border) / 0.3) 1px, transparent 1px);
+    background-size: 60px 60px;
+  }
+
+  .scan-line {
+    background: linear-gradient(
+      180deg,
+      transparent 0%,
+      hsl(var(--primary) / 0.05) 50%,
+      transparent 100%
+    );
+    animation: scan 4s ease-in-out infinite;
+  }
+
+  @keyframes scan {
+    0%, 100% { transform: translateY(-100%); }
+    50% { transform: translateY(100%); }
+  }
+
+  @keyframes pulse-glow {
+    0%, 100% { opacity: 0.4; }
+    50% { opacity: 1; }
+  }
+
+  .animate-pulse-glow {
+    animation: pulse-glow 2s ease-in-out infinite;
+  }
+
+  .font-mono {
+    font-family: 'JetBrains Mono', monospace;
+  }
+}
