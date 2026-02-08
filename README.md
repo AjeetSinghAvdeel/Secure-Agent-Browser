@@ -1,248 +1,165 @@
-SecureAgent Browser
-Runtime-Aware AI System for Detecting and Preventing Malicious Web Environments
-🚨 Problem Statement
+# 🛡️ SecureAgent Browser: Runtime-Aware AI Security
 
-Modern cyber attacks such as phishing, clickjacking, prompt injection, and credential harvesting no longer rely on obvious malicious code. Instead, they exploit:
+**A next-generation AI system for detecting and preventing malicious web environments in real-time.**
 
-Dynamic UI manipulation
+[![Python](https://img.shields.io/badge/Python-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-005571?style=for-the-badge&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
+[![React](https://img.shields.io/badge/React-20232A?style=for-the-badge&logo=react&logoColor=61DAFB)](https://reactjs.org/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-007ACC?style=for-the-badge&logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
+[![Selenium](https://img.shields.io/badge/Selenium-43B02A?style=for-the-badge&logo=selenium&logoColor=white)](https://www.selenium.dev/)
 
-Runtime DOM changes
+---
 
-Hidden overlays and event hijacking
+## 🚨 The Problem
 
-Deceptive forms and user flows
+Modern cyber-attacks have evolved beyond simple, detectable malware. Threats like **phishing, clickjacking, prompt injection, and credential harvesting** now leverage dynamic, runtime manipulations that are invisible to traditional security tools.
 
-Network-level data exfiltration
+-   **Dynamic UI & DOM Manipulation:** Attacks that only appear during user interaction.
+-   **Hidden Overlays & Event Hijacking:** Invisible UI elements that steal clicks and data.
+-   **Deceptive User Flows:** Legitimate-looking forms and flows designed to deceive.
+-   **Network-Level Exfiltration:** Data悄悄 sent to malicious servers.
 
-Traditional static scanners and URL reputation systems fail to detect these threats because the attack only becomes visible during execution.
+Static scanners and URL reputation systems are blind to these threats because the danger is only revealed **at runtime**.
 
-SecureAgent addresses this gap by analyzing web pages the way a real browser and user would experience them — at runtime.
+---
 
-💡 Our Solution
+## 💡 Our Solution: SecureAgent
 
-SecureAgent is an AI-powered, runtime-aware browser security system that:
+SecureAgent is an AI-powered, runtime-aware browser security system built to counter these advanced threats. Instead of asking, "Is this source code malicious?", SecureAgent asks:
 
-Opens web pages in a real instrumented browser
+> **“Is it safe for an autonomous agent to interact with this page *right now*?”**
 
-Observes actual behavior, not just source code
+It does this by:
+1.  **Opening** web pages in a real, instrumented browser.
+2.  **Observing** the page's actual behavior as a user would see it.
+3.  **Analyzing** runtime data using a multi-layered intelligence engine.
+4.  **Assigning** an explainable risk score and recommending an action.
 
-Detects malicious intent using multiple intelligence layers
+---
 
-Assigns explainable risk scores
+## 🧠 Key Features
 
-Enforces policy-based decisions on what an agent/user should do next
+-   **Runtime-First Analysis:** Prioritizes live browser behavior over static source code.
+-   **Multi-Layered Intelligence:** Combines rule-based detectors, a machine learning model, and an LLM reasoner for comprehensive threat analysis.
+-   **Explainable AI (XAI):** Delivers clear, human-readable explanations for every security decision—no black boxes.
+-   **Agent Action Mediation:** Goes beyond detection to provide actionable policy decisions: `ALLOW`, `WARN`, or `BLOCK`.
+-   **Realistic Attack Simulation:** Includes a suite of test pages to validate detection capabilities in a controlled environment.
+-   **Live Security Dashboard:** A real-time interface to monitor scans, view threats, and understand risks.
 
-Instead of asking “Is this page malicious?”, SecureAgent asks:
+---
 
-“Is it safe for an agent to interact with this page right now?”
+## 🏗️ System Architecture
 
-🧠 Key Innovations
+The system is designed as a pipeline that flows from the user/agent interaction down to a live security dashboard.
 
-Runtime > Static priority (behavior overrides language)
-
-Explainable AI decisions, not black-box scoring
-
-Agent action mediation (ALLOW / WARN / BLOCK)
-
-Realistic attack simulations for validation
-
-End-to-end pipeline from browser to dashboard
-```bash
-🏗️ System Architecture
+```
 User / Agent
      │
      ▼
-Frontend (React + TS)
+Frontend (React + TypeScript)
      │
      ▼
-FastAPI Backend
+FastAPI Backend (Python)
      │
      ├─▶ Selenium Browser (Instrumented)
-     │        ├─ DOM Mutation Tracking
-     │        ├─ Hidden UI Detection
-     │        ├─ Event Hijack Detection
-     │        └─ Network Interception
+     │   ├─ DOM Mutation Tracking
+     │   ├─ Hidden UI Detection
+     │   ├─ Event Hijack Detection
+     │   └─ Network Interception
      │
      ├─▶ Static Analysis (HTML, Forms, Keywords)
      ├─▶ ML Model (Statistical Risk Patterns)
-     ├─▶ LLM Reasoner (Intent & Context)
+     ├─▶ LLM Reasoner (Intent & Context Analysis)
      ├─▶ Risk Engine (Explainable Scoring)
-     └─▶ Policy Engine (Agent Decision)
+     └─▶ Policy Engine (Agent Decision Logic)
      │
      ▼
-Firestore (Real-time Storage)
+Firestore (Real-time Database)
      │
      ▼
 Security Dashboard (Live Updates)
 ```
-🧰 Technology Stack
-Frontend
 
-React + TypeScript
+---
 
-Tailwind CSS (glassmorphism UI)
+## 🧰 Technology Stack
 
-Framer Motion (animations)
+-   **Frontend:** React, TypeScript, Tailwind CSS, Framer Motion, Lucide Icons, Firebase Firestore
+-   **Backend:** FastAPI (Python), Selenium, Chromium, BeautifulSoup
+-   **Intelligence Layer:**
+    -   Custom rule-based detectors (Injection, Phishing, Hidden UI)
+    -   Machine Learning model for statistical anomaly detection
+    -   LLM-based intent reasoning
+    -   Explainable risk-scoring engine
+    -   Policy-based agent decision system
 
-Lucide Icons
+---
 
-Firebase Firestore (real-time updates)
+## 🔍 Detection Capabilities
 
-Backend
+SecureAgent is equipped to detect a wide range of modern web threats:
 
-FastAPI (Python)
+| Threat Type                     | Detection Method                                                                                             |
+| ------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| **Prompt Injection**            | Identifies malicious instruction patterns like "Ignore previous instructions" or "Act as system administrator." |
+| **Hidden UI & Clickjacking**    | Uncovers invisible overlays, zero-opacity elements, hidden iframes, and other deceptive UI manipulations.        |
+| **Phishing & Credential Theft** | Flags pages impersonating trusted brands, using deceptive forms, or operating on suspicious domains.           |
+| **Runtime Behavior Analysis**   | Monitors for high-frequency DOM mutations, click interception, and event listener hijacking.                 |
+| **Network Exfiltration**        | Detects cross-origin data transfers and suspicious network traffic related to credential submission.         |
 
-Selenium + Chromium (real browser execution)
+---
 
-BeautifulSoup (HTML parsing)
+## 🤖 Security Engine: Risk & Policy
 
-Intelligence Layer
+#### Risk Scoring
+Each scan produces a clear, actionable security assessment:
+-   **Risk Score (0–100):** A quantitative measure of the threat level.
+-   **Confidence Level:** The certainty of the assessment (Low, Medium, High).
+-   **Primary Threat Signal:** The most significant threat detected.
+-   **Attack Chain Explanation:** A human-readable narrative of the findings.
 
-Rule-based detectors (injection, phishing, hidden UI)
+> **Design Principle:** Runtime and network behavior always override signals from the ML/LLM. A legitimate website is never blocked based on language alone.
 
-Machine Learning model (statistical anomaly detection)
+#### Policy Engine
+SecureAgent simulates an agent's potential actions and decides on a policy:
+-   **❌ BLOCK:** High-risk environments, especially those involving credential harvesting.
+-   **⚠️ WARN:** Suspicious environments where caution is advised.
+-   **✅ ALLOW:** Safe environments with no malicious indicators.
 
-LLM-based intent reasoning
+---
 
-Explainable risk scoring engine
+## 📊 Live Security Dashboard
 
-Policy-based agent decision system
+The dashboard offers a real-time, transparent view of the system's operations, providing:
+-   Live scan updates and status breakdowns (Safe, Warning, Blocked).
+-   Expandable, detailed analysis for every scan.
+-   Full explainability of policy decisions and recommended agent actions.
 
-🔍 Detection Capabilities
-1️⃣ Prompt Injection Detection
+This makes the entire system auditable and easy to understand.
 
-Detects malicious instruction patterns such as:
+---
 
-“Ignore previous instructions”
+## 🧪 Attack Simulations
 
-“Act as system / admin”
+The project includes local, realistic test websites to demonstrate and validate detection of:
+-   Prompt injection attacks
+-   Hidden UI and clickjacking
+-   Phishing login portals
 
-“Reveal secrets / credentials”
+These simulations prove the system's effectiveness in a hands-on, verifiable way.
 
-2️⃣ Hidden UI & Clickjacking
+---
 
-Identifies:
+## 🎯 Why SecureAgent Stands Out
 
-Invisible overlays
+-   **Runtime-Aware:** It sees what users and agents see, not just what static analysis reveals.
+-   **Multi-Layered Intelligence:** Fuses rules, ML, and LLM insights for robust detection.
+-   **Truly Explainable:** Provides clear justifications for its decisions.
+-   **Agent-Centric Security:** Designed for the new era of autonomous web interaction.
+-   **End-to-End Solution:** From the browser to the dashboard, it's a complete, integrated system.
 
-Zero-opacity elements
+---
 
-Hidden iframes
+## ⚠️ Disclaimer
 
-Runtime UI manipulation
-
-3️⃣ Phishing & Credential Harvesting
-
-Flags pages that:
-
-Impersonate trusted brands
-
-Contain password input forms
-
-Operate outside legitimate domains
-
-4️⃣ Runtime Behavior Analysis
-
-Monitors:
-
-DOM mutation frequency
-
-Click interception
-
-Event listener hijacking
-
-5️⃣ Network Exfiltration Detection
-
-Detects:
-
-Cross-origin POST / beacon requests
-
-Credential-related network traffic
-
-⚖️ Risk Scoring Engine
-
-Each scan produces:
-
-Risk Score (0–100)
-
-Confidence Level (low / medium / high)
-
-Primary Threat Signal
-
-Attack Chain Explanation
-
-Human-readable reasons
-
-Important Design Principle
-
-Runtime and network behavior override ML/LLM signals.
-Legitimate websites are never blocked by language alone.
-
-🤖 Agent Action Mediation (Policy Engine)
-
-SecureAgent simulates what an agent might do next, such as:
-
-Submitting credentials
-
-Browsing normally
-
-Switching to read-only mode
-
-The Policy Engine then decides:
-
-Risk / Context	Decision
-High risk or credential harvesting	❌ BLOCK
-Suspicious environment	⚠️ WARN
-No malicious indicators	✅ ALLOW
-
-This goes beyond detection and demonstrates safe autonomous agent behavior.
-
-📊 Security Dashboard
-
-The dashboard provides:
-
-Live scan updates
-
-Status breakdown (Safe / Warning / Blocked)
-
-Expandable analysis per scan
-
-Policy decisions and agent actions
-
-Full explainability for every decision
-
-This makes the system auditable, transparent, and judge-friendly.
-
-🧪 Attack Simulation Pages
-
-The project includes realistic local test websites to demonstrate:
-
-Prompt injection attacks
-
-Hidden UI / clickjacking
-
-Phishing login portals
-
-These are used to:
-
-Validate detection logic
-
-Demonstrate system behavior during evaluation
-
-Prove real-world applicability
-
-🎯 Why This Project Stands Out
-
-✔ Runtime-aware (not static scanning)
-✔ Multi-layer intelligence (rules + ML + LLM)
-✔ Explainable decisions
-✔ Agent-centric security approach
-✔ Realistic attack demonstrations
-✔ Clean UI + live dashboard
-
-This is not just a detector, but a decision-making security system.
-
-⚠️ Disclaimer
-
-This project is intended strictly for educational and defensive security research purposes.
-All malicious pages are simulated and run locally.
+This project is intended strictly for educational and defensive security research purposes. All malicious pages are simulated and run locally in a controlled environment.
