@@ -123,11 +123,49 @@ def analyze_behavior(behavior):
 
 
 # -------------------------------
+# 🔥 Network Behavior Analysis (STEP 4)
+# -------------------------------
+def analyze_network(network, page_url):
+    risk = 0
+    reasons = []
+
+    if not network:
+        return 0, []
+
+    page_domain = urlparse(page_url).netloc.lower()
+
+    for req in network:
+        req_domain = (req.get("domain") or "").lower()
+        method = req.get("method", "").upper()
+
+        if not req_domain:
+            continue
+
+        # Cross-origin POSTs are HIGH risk
+        if req_domain != page_domain and method in ("POST", "PUT", "BEACON"):
+            risk += 30
+            reasons.append(
+                f"Cross-origin data exfiltration attempt to {req_domain}"
+            )
+
+        # Credential keywords in URL
+        url = (req.get("url") or "").lower()
+        if any(k in url for k in ["password", "token", "session", "auth"]):
+            risk += 25
+            reasons.append(
+                f"Sensitive data transmission detected ({method})"
+            )
+
+    return risk, reasons
+
+
+# -------------------------------
 # Main Scanner
 # -------------------------------
 def scan_page(payload, page_url=None):
     html = payload.get("html", "")
     behavior = payload.get("behavior", {})
+    network = payload.get("network", [])
 
     soup, text = extract_text(html)
 
@@ -138,17 +176,17 @@ def scan_page(payload, page_url=None):
     ml_result = predict_attack(text)
     llm_result, llm_reasons = analyze_intent(text)
 
-    # ✅ FIX: behavior analyzed BEFORE calculate_risk
     behavior_risk, behavior_reasons = analyze_behavior(behavior)
+    network_risk, network_reasons = analyze_network(network, page_url or "")
 
-    base_risk, reasons, confidence = calculate_risk(
+    base_risk, reasons, confidence, decision = calculate_risk(
         injection,
         hidden,
         phishing,
         ml_result,
         llm_result,
-        behavior_risk=behavior_risk,
-        behavior_findings=behavior_reasons,
+        behavior_risk=behavior_risk + network_risk,
+        behavior_findings=behavior_reasons + network_reasons,
     )
 
     return {
@@ -158,7 +196,9 @@ def scan_page(payload, page_url=None):
         "ml_result": ml_result,
         "llm_result": llm_result,
         "behavior": behavior,
+        "network": network,
         "risk": base_risk,
         "confidence": confidence,
         "reasons": reasons + llm_reasons,
+        "decision": decision,
     }

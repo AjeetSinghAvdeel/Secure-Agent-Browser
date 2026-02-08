@@ -12,6 +12,8 @@ import {
   MousePointerClick,
   FileWarning,
   Filter,
+  ChevronDown,
+  ChevronUp,
 } from "lucide-react";
 
 import Navbar from "@/components/Navbar";
@@ -63,8 +65,7 @@ const Dashboard = () => {
 
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
-
-  /* ---------- Derived stats ---------- */
+  const [expandedScanId, setExpandedScanId] = useState<string | null>(null);
 
   const filtered = scans.filter((scan) => {
     const matchesSearch = scan.url
@@ -86,50 +87,8 @@ const Dashboard = () => {
     ? Math.round(scans.reduce((sum, s) => sum + s.risk, 0) / total)
     : 0;
 
-  /* ---------- Detection breakdown ---------- */
-
-  const detections = [
-    {
-      title: "Prompt Injection",
-      icon: FileWarning,
-      detected: scans.filter((s) => s.details?.injection?.length > 0).length,
-      severity: "high" as const,
-      desc: "Pattern-matched injection attempts in page content.",
-    },
-    {
-      title: "Phishing Detection",
-      icon: MousePointerClick,
-      detected: scans.filter((s) => s.details?.phishing?.length > 0).length,
-      severity: "high" as const,
-      desc: "Fake login forms mimicking trusted services.",
-    },
-    {
-      title: "Clickjacking / Hidden",
-      icon: Eye,
-      detected: scans.filter((s) => s.details?.hidden?.length > 0).length,
-      severity: "medium" as const,
-      desc: "Hidden overlays or iframe-based deception.",
-    },
-    {
-      title: "ML Model Verdict",
-      icon: Brain,
-      detected: scans.filter((s) => s.details?.ml_result === 1).length,
-      severity: "info" as const,
-      desc: "ML classifier malicious verdict.",
-    },
-    {
-      title: "LLM Reasoning",
-      icon: Brain,
-      detected: scans.filter((s) => s.details?.llm_result === 1).length,
-      severity: "info" as const,
-      desc: "Reasoning-based intent analysis.",
-    },
-  ];
-
   const formatTime = (ts: any) =>
     ts?.toDate ? ts.toDate().toLocaleString() : "--";
-
-  /* ---------------------------------- */
 
   return (
     <div className="min-h-screen bg-background">
@@ -152,28 +111,6 @@ const Dashboard = () => {
                 Real-time threat monitoring & analysis
               </p>
             </div>
-
-            <div className="ml-auto flex items-center gap-3">
-              <Link
-                to="/scan"
-                className="text-sm font-medium bg-primary/10 text-primary border border-primary/30 px-4 py-2 rounded-lg hover:bg-primary/20 hidden sm:block"
-              >
-                + New Scan
-              </Link>
-
-              <div className="flex items-center gap-2 glass rounded-full px-4 py-2">
-                <span
-                  className={`w-2 h-2 rounded-full ${
-                    loading
-                      ? "bg-muted"
-                      : "bg-cyber-safe animate-pulse-glow"
-                  }`}
-                />
-                <span className="font-mono text-xs text-muted-foreground">
-                  {loading ? "SYNCING" : "LIVE"}
-                </span>
-              </div>
-            </div>
           </div>
 
           {/* Stats */}
@@ -193,13 +130,7 @@ const Dashboard = () => {
                       : (stat.filter as StatusFilter)
                   )
                 }
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                className={`glass rounded-xl p-5 text-left ${
-                  statusFilter === stat.filter
-                    ? "border-primary/50"
-                    : "hover:border-primary/20"
-                }`}
+                className="glass rounded-xl p-5 text-left"
               >
                 <p className="text-xs text-muted-foreground font-mono mb-1">
                   {stat.label}
@@ -209,55 +140,35 @@ const Dashboard = () => {
             ))}
           </div>
 
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {/* Scan Table */}
+          <div className="glass rounded-xl overflow-hidden">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b text-xs font-mono text-muted-foreground">
+                  <th className="px-6 py-3 text-left">URL</th>
+                  <th className="px-4 py-3">Time</th>
+                  <th className="px-4 py-3 text-center">Risk</th>
+                  <th className="px-4 py-3 text-center">Status</th>
+                  <th className="px-4 py-3 text-center">Details</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map((scan) => {
+                  const Icon = statusIcons[scan.status];
+                  const cfg = statusConfig[scan.status];
+                  const expanded = expandedScanId === scan.id;
 
-            {/* Scan Table */}
-            <div className="lg:col-span-2 glass rounded-xl overflow-hidden">
-              <div className="px-6 py-4 border-b border-border flex items-center gap-3">
-                <Search className="w-4 h-4 text-muted-foreground" />
-                <input
-                  placeholder="Search URLs..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="bg-transparent text-sm outline-none flex-1 font-mono"
-                />
-                {statusFilter !== "all" && (
-                  <button
-                    onClick={() => setStatusFilter("all")}
-                    className="text-xs font-mono text-primary bg-primary/10 px-2 py-1 rounded-full"
-                  >
-                    <Filter className="w-3 h-3 inline" /> {statusFilter} ×
-                  </button>
-                )}
-              </div>
-
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b text-xs font-mono text-muted-foreground">
-                    <th className="px-6 py-3 text-left">URL</th>
-                    <th className="px-4 py-3">Time</th>
-                    <th className="px-4 py-3 text-center">Risk</th>
-                    <th className="px-4 py-3 text-center">Status</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filtered.map((scan) => {
-                    const Icon = statusIcons[scan.status];
-                    const cfg = statusConfig[scan.status];
-
-                    return (
-                      <tr
-                        key={scan.id}
-                        className="border-b hover:bg-secondary/30"
-                      >
-                        <td className="px-6 py-3 font-mono text-xs truncate max-w-[280px]">
+                  return (
+                    <>
+                      <tr key={scan.id} className="border-b">
+                        <td className="px-6 py-3 font-mono text-xs truncate">
                           {scan.url}
                         </td>
                         <td className="px-4 py-3 text-xs font-mono">
                           {formatTime(scan.timestamp)}
                         </td>
                         <td className="px-4 py-3 text-center">
-                          <RiskBar score={scan.risk} />
+                          <span className="font-mono">{scan.risk}</span>
                         </td>
                         <td className="px-4 py-3 text-center">
                           <span
@@ -267,30 +178,44 @@ const Dashboard = () => {
                             {cfg.label}
                           </span>
                         </td>
+                        <td className="px-4 py-3 text-center">
+                          <button
+                            onClick={() =>
+                              setExpandedScanId(expanded ? null : scan.id)
+                            }
+                            className="text-xs font-mono text-primary flex items-center gap-1 mx-auto"
+                          >
+                            {expanded ? <ChevronUp /> : <ChevronDown />}
+                            {expanded ? "Hide" : "View"}
+                          </button>
+                        </td>
                       </tr>
-                    );
-                  })}
 
-                  {filtered.length === 0 && (
-                    <tr>
-                      <td
-                        colSpan={4}
-                        className="px-6 py-8 text-center text-muted-foreground"
-                      >
-                        No scans available
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
+                      {expanded && (
+                        <tr className="bg-secondary/20">
+                          <td colSpan={5} className="px-6 py-4 text-xs">
+                            <p className="font-mono mb-2">
+                              <strong>Confidence:</strong>{" "}
+                              {scan.details?.confidence || "unknown"}
+                            </p>
 
-            {/* Right Panel */}
-            <div className="space-y-4">
-              <RiskGauge avgScore={avgScore} />
-              <DetectionPanel detections={detections} />
-            </div>
+                            <ul className="list-disc pl-4 space-y-1">
+                              {scan.details?.reasons?.map(
+                                (r: string, i: number) => (
+                                  <li key={i}>{r}</li>
+                                )
+                              )}
+                            </ul>
+                          </td>
+                        </tr>
+                      )}
+                    </>
+                  );
+                })}
+              </tbody>
+            </table>
           </div>
+
         </div>
       </div>
 
@@ -298,54 +223,5 @@ const Dashboard = () => {
     </div>
   );
 };
-
-/* ---------------------------------- */
-/* COMPONENTS */
-/* ---------------------------------- */
-
-const RiskBar = ({ score }: { score: number }) => {
-  const color =
-    score < 30
-      ? "bg-cyber-safe"
-      : score < 70
-      ? "bg-cyber-warning"
-      : "bg-cyber-danger";
-
-  return (
-    <div className="flex items-center gap-2 justify-center">
-      <div className="w-16 h-1.5 bg-secondary rounded-full overflow-hidden">
-        <div className={`${color} h-full`} style={{ width: `${score}%` }} />
-      </div>
-      <span className="font-mono text-xs w-6">{score}</span>
-    </div>
-  );
-};
-
-const RiskGauge = ({ avgScore }: { avgScore: number }) => (
-  <div className="glass rounded-xl p-6 text-center">
-    <p className="text-xs font-mono text-muted-foreground mb-3">
-      AVG RISK SCORE
-    </p>
-    <div className="text-4xl font-mono font-bold">{avgScore}</div>
-  </div>
-);
-
-const DetectionPanel = ({ detections }: any) => (
-  <div className="glass rounded-xl overflow-hidden">
-    <div className="px-5 py-3 border-b border-border">
-      <h3 className="text-sm font-semibold">Detection Breakdown</h3>
-    </div>
-    {detections.map((d: any) => (
-      <div key={d.title} className="px-5 py-3 flex items-center gap-3">
-        <d.icon className={`w-4 h-4 ${severityColor[d.severity]}`} />
-        <div className="flex-1">
-          <p className="text-sm font-medium">{d.title}</p>
-          <p className="text-xs text-muted-foreground">{d.desc}</p>
-        </div>
-        <span className="font-mono text-xs font-bold">{d.detected}</span>
-      </div>
-    ))}
-  </div>
-);
 
 export default Dashboard;
