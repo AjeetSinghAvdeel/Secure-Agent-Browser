@@ -122,9 +122,9 @@ Each scan produces a clear, actionable security assessment:
 
 #### Policy Engine
 SecureAgent simulates an agent's potential actions and decides on a policy:
--   ** BLOCK:** High-risk environments, especially those involving credential harvesting.
--   ** WARN:** Suspicious environments where caution is advised.
--   ** ALLOW:** Safe environments with no malicious indicators.
+-    BLOCK: High-risk environments, especially those involving credential harvesting.
+-    WARN: Suspicious environments where caution is advised.
+-    ALLOW: Safe environments with no malicious indicators.
 
 ---
 
