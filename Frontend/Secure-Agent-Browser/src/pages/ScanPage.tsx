@@ -1,9 +1,24 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Loader2, Search } from "lucide-react";
+import { Loader2, Search, ShieldAlert } from "lucide-react";
 
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
+
+const DEMO_ATTACKS = [
+  {
+    label: "Prompt Injection Demo",
+    path: "attacks/attack1_injection.html",
+  },
+  {
+    label: "Hidden UI / Clickjacking Demo",
+    path: "attacks/attack2_hidden.html",
+  },
+  {
+    label: "Phishing Website Demo",
+    path: "attacks/attack3_phishing.html",
+  },
+];
 
 const ScanPage = () => {
   const [url, setUrl] = useState("");
@@ -11,9 +26,8 @@ const ScanPage = () => {
   const [error, setError] = useState<string | null>(null);
   const navigate = useNavigate();
 
-  const handleScan = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!url.trim()) return;
+  const runScan = async (targetUrl: string) => {
+    if (!targetUrl.trim()) return;
 
     setLoading(true);
     setError(null);
@@ -22,22 +36,29 @@ const ScanPage = () => {
       const res = await fetch("http://127.0.0.1:8000/scan", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url }),
+        body: JSON.stringify({ url: targetUrl }),
       });
 
       if (!res.ok) throw new Error(await res.text());
 
       await res.json();
-
-      // give Firestore a moment
       setTimeout(() => navigate("/dashboard"), 400);
-
     } catch (err) {
       console.error(err);
       setError("Scan failed. Backend or Selenium error.");
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleScan = (e: React.FormEvent) => {
+    e.preventDefault();
+    runScan(url);
+  };
+
+  const handleDemoClick = (path: string) => {
+    setUrl(path);
+    runScan(path);
   };
 
   return (
@@ -49,18 +70,51 @@ const ScanPage = () => {
           Scan a Web Page
         </h1>
 
+        {/* Scan Input */}
         <form onSubmit={handleScan} className="glass flex gap-2 p-2">
           <Search className="mt-3 ml-3 text-muted-foreground" />
           <input
             className="flex-1 bg-transparent outline-none font-mono"
-            placeholder="https://example.com"
+            placeholder="https://example.com or local file path"
             value={url}
-            onChange={e => setUrl(e.target.value)}
+            onChange={(e) => setUrl(e.target.value)}
           />
-          <button className="px-5 py-2 bg-primary rounded-lg">
+          <button
+            type="submit"
+            disabled={loading}
+            className="px-5 py-2 bg-primary rounded-lg"
+          >
             {loading ? <Loader2 className="animate-spin" /> : "Scan"}
           </button>
         </form>
+
+        {/* 🔥 DEMO ATTACKS – THEMED */}
+        <div className="mt-8 glass rounded-xl p-4 space-y-2">
+          <p className="text-xs font-mono text-muted-foreground mb-2">
+            DEMO ATTACK SCENARIOS
+          </p>
+
+          {DEMO_ATTACKS.map((demo) => (
+            <button
+              key={demo.path}
+              disabled={loading}
+              onClick={() => handleDemoClick(demo.path)}
+              className="
+                w-full flex items-center gap-3
+                px-4 py-3 rounded-lg
+                font-mono text-sm text-left
+                border border-border
+                bg-background/40
+                hover:border-primary/40
+                hover:bg-background/60
+                transition
+              "
+            >
+              <ShieldAlert className="w-4 h-4 text-cyber-warning" />
+              <span>{demo.label}</span>
+            </button>
+          ))}
+        </div>
 
         {error && (
           <p className="mt-4 text-red-500 text-center">{error}</p>
