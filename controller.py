@@ -30,6 +30,11 @@ def is_whitelisted(url):
 
 
 def run(url):
+    # -----------------------------
+    # Convert local file → file:// URL
+    # -----------------------------
+    if os.path.exists(url):
+        url = "file://" + os.path.abspath(url)
 
     # -----------------------------
     # WHITELIST CHECK
