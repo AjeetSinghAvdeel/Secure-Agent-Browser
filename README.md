@@ -1,4 +1,4 @@
-# 🛡️ SecureAgent Browser: Runtime-Aware AI Security
+#  SecureAgent Browser: Runtime-Aware AI Security
 
 **A next-generation AI system for detecting and preventing malicious web environments in real-time.**
 
@@ -10,7 +10,7 @@
 
 ---
 
-## 🚨 The Problem
+##  The Problem
 
 Modern cyber-attacks have evolved beyond simple, detectable malware. Threats like **phishing, clickjacking, prompt injection, and credential harvesting** now leverage dynamic, runtime manipulations that are invisible to traditional security tools.
 
@@ -23,7 +23,7 @@ Static scanners and URL reputation systems are blind to these threats because th
 
 ---
 
-## 💡 Our Solution: SecureAgent
+##  Our Solution: SecureAgent
 
 SecureAgent is an AI-powered, runtime-aware browser security system built to counter these advanced threats. Instead of asking, "Is this source code malicious?", SecureAgent asks:
 
@@ -37,7 +37,7 @@ It does this by:
 
 ---
 
-## 🧠 Key Features
+##  Key Features
 
 -   **Runtime-First Analysis:** Prioritizes live browser behavior over static source code.
 -   **Multi-Layered Intelligence:** Combines rule-based detectors, a machine learning model, and an LLM reasoner for comprehensive threat analysis.
@@ -48,7 +48,7 @@ It does this by:
 
 ---
 
-## 🏗️ System Architecture
+##  System Architecture
 
 The system is designed as a pipeline that flows from the user/agent interaction down to a live security dashboard.
 
@@ -82,7 +82,7 @@ Security Dashboard (Live Updates)
 
 ---
 
-## 🧰 Technology Stack
+##  Technology Stack
 
 -   **Frontend:** React, TypeScript, Tailwind CSS, Framer Motion, Lucide Icons, Firebase Firestore
 -   **Backend:** FastAPI (Python), Selenium, Chromium, BeautifulSoup
@@ -95,7 +95,7 @@ Security Dashboard (Live Updates)
 
 ---
 
-## 🔍 Detection Capabilities
+##  Detection Capabilities
 
 SecureAgent is equipped to detect a wide range of modern web threats:
 
@@ -109,7 +109,7 @@ SecureAgent is equipped to detect a wide range of modern web threats:
 
 ---
 
-## 🤖 Security Engine: Risk & Policy
+##  Security Engine: Risk & Policy
 
 #### Risk Scoring
 Each scan produces a clear, actionable security assessment:
@@ -122,13 +122,13 @@ Each scan produces a clear, actionable security assessment:
 
 #### Policy Engine
 SecureAgent simulates an agent's potential actions and decides on a policy:
--   **❌ BLOCK:** High-risk environments, especially those involving credential harvesting.
--   **⚠️ WARN:** Suspicious environments where caution is advised.
--   **✅ ALLOW:** Safe environments with no malicious indicators.
+-   ** BLOCK:** High-risk environments, especially those involving credential harvesting.
+-   ** WARN:** Suspicious environments where caution is advised.
+-   ** ALLOW:** Safe environments with no malicious indicators.
 
 ---
 
-## 📊 Live Security Dashboard
+##  Live Security Dashboard
 
 The dashboard offers a real-time, transparent view of the system's operations, providing:
 -   Live scan updates and status breakdowns (Safe, Warning, Blocked).
@@ -139,7 +139,7 @@ This makes the entire system auditable and easy to understand.
 
 ---
 
-## 🧪 Attack Simulations
+##  Attack Simulations
 
 The project includes local, realistic test websites to demonstrate and validate detection of:
 -   Prompt injection attacks
@@ -150,7 +150,7 @@ These simulations prove the system's effectiveness in a hands-on, verifiable way
 
 ---
 
-## 🎯 Why SecureAgent Stands Out
+##  Why SecureAgent Stands Out
 
 -   **Runtime-Aware:** It sees what users and agents see, not just what static analysis reveals.
 -   **Multi-Layered Intelligence:** Fuses rules, ML, and LLM insights for robust detection.
@@ -160,6 +160,6 @@ These simulations prove the system's effectiveness in a hands-on, verifiable way
 
 ---
 
-## ⚠️ Disclaimer
+##  Disclaimer
 
 This project is intended strictly for educational and defensive security research purposes. All malicious pages are simulated and run locally in a controlled environment.
