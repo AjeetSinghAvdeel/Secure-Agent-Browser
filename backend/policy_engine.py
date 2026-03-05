@@ -1,65 +1,137 @@
-def evaluate_action(action, scan_result):
+"""Policy-as-code engine for risk response decisions."""
+
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Any, Dict
+
+import yaml
+
+DEFAULT_POLICY_MODE = "balanced"
+POLICY_DIR = Path(__file__).resolve().parent / "policies"
+ALLOWED_DECISIONS = ("ALLOW", "WARN", "BLOCK")
+
+
+def _clamp01(value: float) -> float:
+    return max(0.0, min(1.0, float(value)))
+
+
+def _normalize_risk(risk_score: float) -> float:
     """
-    Policy-Governed Agent Decision Engine (Explainable)
+    Normalize risk score into [0, 1].
+    Supports both normalized (0-1) and percent-like (0-100) inputs.
     """
+    risk = float(risk_score)
+    if risk > 1.0:
+        risk = risk / 100.0
+    return _clamp01(risk)
 
-    risk = scan_result.get("risk", 0)
-    decision_meta = scan_result.get("decision", {})
-    primary_signal = decision_meta.get("primary_signal", "benign")
 
-    explanation = []
-    enforced_action = action["type"]
+def load_policy(policy_mode: str = DEFAULT_POLICY_MODE) -> Dict[str, float]:
+    """
+    Load policy thresholds from YAML for the selected mode.
+    """
+    mode = (policy_mode or DEFAULT_POLICY_MODE).strip().lower()
+    policy_path = POLICY_DIR / f"{mode}.yaml"
 
-    # -----------------------------
-    # HARD BLOCK CONDITIONS
-    # -----------------------------
-    if risk >= 70:
-        explanation.append("Overall risk score exceeds safe threshold")
-        explanation.append(f"Primary threat signal: {primary_signal}")
+    if not policy_path.exists():
+        raise ValueError(
+            f"Unknown policy mode '{policy_mode}'. "
+            f"Expected one of: strict, balanced, research."
+        )
 
-        return {
-            "decision": "BLOCK",
-            "enforced_action": "terminate_session",
-            "reason": "High-risk malicious environment detected",
-            "explanation": explanation
-        }
+    with policy_path.open("r", encoding="utf-8") as f:
+        policy = yaml.safe_load(f) or {}
 
-    if (
-        action["type"] == "submit_form"
-        and primary_signal == "credential_harvesting"
-    ):
-        explanation.append("Agent intended to submit credentials")
-        explanation.append("Site identified as credential harvesting threat")
+    if "block_if_risk_above" not in policy or "warn_if_risk_above" not in policy:
+        raise ValueError(f"Policy file '{policy_path.name}' is missing required keys.")
 
-        return {
-            "decision": "BLOCK",
-            "enforced_action": "disable_form_submission",
-            "reason": "Credential submission blocked on phishing site",
-            "explanation": explanation
-        }
+    block_threshold = _clamp01(policy["block_if_risk_above"])
+    warn_threshold = _clamp01(policy["warn_if_risk_above"])
 
-    # -----------------------------
-    # WARN CONDITIONS
-    # -----------------------------
-    if risk >= 40:
-        explanation.append("Suspicious indicators detected")
-        explanation.append("Agent allowed to proceed with caution")
-
-        return {
-            "decision": "WARN",
-            "enforced_action": "read_only_mode",
-            "reason": "Suspicious activity detected",
-            "explanation": explanation
-        }
-
-    # -----------------------------
-    # ALLOW
-    # -----------------------------
-    explanation.append("No significant malicious indicators detected")
+    if warn_threshold >= block_threshold:
+        raise ValueError(
+            f"Invalid policy '{policy_path.name}': warn_if_risk_above must be lower "
+            "than block_if_risk_above."
+        )
 
     return {
-        "decision": "ALLOW",
-        "enforced_action": enforced_action,
-        "reason": "Environment assessed as safe",
-        "explanation": explanation
+        "block_if_risk_above": block_threshold,
+        "warn_if_risk_above": warn_threshold,
     }
+
+
+def evaluate_risk_policy(
+    risk_score: float,
+    policy_mode: str = DEFAULT_POLICY_MODE,
+) -> Dict[str, str]:
+    """
+    Evaluate risk score against a selected policy.
+
+    Returns:
+        {
+          "decision": "ALLOW | WARN | BLOCK",
+          "policy_mode": "...",
+          "reason": "..."
+        }
+    """
+    policy = load_policy(policy_mode)
+    risk = _normalize_risk(risk_score)
+    mode = (policy_mode or DEFAULT_POLICY_MODE).strip().lower()
+
+    block_threshold = policy["block_if_risk_above"]
+    warn_threshold = policy["warn_if_risk_above"]
+
+    if risk >= block_threshold:
+        decision = "BLOCK"
+        reason = (
+            f"Risk score {risk:.2f} exceeds block threshold {block_threshold:.2f} "
+            f"for '{mode}' policy."
+        )
+    elif risk >= warn_threshold:
+        decision = "WARN"
+        reason = (
+            f"Risk score {risk:.2f} exceeds warn threshold {warn_threshold:.2f} "
+            f"for '{mode}' policy."
+        )
+    else:
+        decision = "ALLOW"
+        reason = (
+            f"Risk score {risk:.2f} is below warn threshold {warn_threshold:.2f} "
+            f"for '{mode}' policy."
+        )
+
+    return {
+        "decision": decision,
+        "policy_mode": mode,
+        "reason": reason,
+    }
+
+
+def evaluate_action(
+    action: Dict[str, Any],
+    scan_result: Dict[str, Any],
+    policy_mode: str = DEFAULT_POLICY_MODE,
+) -> Dict[str, str]:
+    """
+    Backward-compatible wrapper used by API flow.
+    Reads risk from scan result and applies selected policy mode.
+    """
+    _ = action  # Action-specific controls can be layered here later.
+    risk_score = scan_result.get("risk", 0)
+    return evaluate_risk_policy(risk_score=risk_score, policy_mode=policy_mode)
+
+
+if __name__ == "__main__":
+    test_cases = [
+        ("strict", 0.2),
+        ("strict", 0.4),
+        ("strict", 0.8),
+        ("balanced", 0.55),
+        ("research", 0.85),
+        ("research", 0.95),
+    ]
+
+    for mode, risk in test_cases:
+        result = evaluate_risk_policy(risk_score=risk, policy_mode=mode)
+        print(f"mode={mode}, risk={risk:.2f} -> {result}")

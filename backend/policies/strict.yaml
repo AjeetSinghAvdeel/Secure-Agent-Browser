@@ -1,0 +1,2 @@
+block_if_risk_above: 0.6
+warn_if_risk_above: 0.3
