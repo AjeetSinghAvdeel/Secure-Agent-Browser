@@ -50,21 +50,6 @@ const statusConfig = {
 type StatusFilter = "all" | "safe" | "warning" | "blocked";
 type Decision = "ALLOW" | "WARN" | "BLOCK";
 
-type DashboardPanelState = {
-  riskScore: number;
-  trustScore: number;
-  decision: Decision;
-  indicators: Array<{
-    name: string;
-    detected: boolean;
-    severity?: "low" | "medium" | "high" | "critical";
-  }>;
-  explanation: {
-    summary: string;
-    reasons: string[];
-  };
-};
-
 type Scan = {
   id: string;
   url: string;
@@ -72,6 +57,8 @@ type Scan = {
   time?: string;
   risk: number;
   trust?: number;
+  trust_score?: number | string;
+  domainTrust?: number | string;
   analysisSummary?: string;
   status?: "safe" | "warning" | "blocked";
   decision?: Decision;
@@ -215,7 +202,7 @@ const Dashboard = () => {
   };
 
   const resolveTrustScore = (scan: Scan): number => {
-    const rawTrust = (scan as any).trust ?? (scan as any).trust_score ?? (scan as any).domainTrust;
+    const rawTrust = scan.trust ?? scan.trust_score ?? scan.domainTrust;
     if (typeof rawTrust === "number" && Number.isFinite(rawTrust)) {
       return Math.max(0, Math.min(100, rawTrust));
     }
@@ -269,7 +256,6 @@ const Dashboard = () => {
           return (Number.isFinite(bTime) ? bTime : 0) - (Number.isFinite(aTime) ? aTime : 0);
         });
 
-        console.log("Loaded scans:", sorted);
         setScanHistory(sorted);
 
         const blocked = sorted.find((s) => s.decision === "BLOCK");

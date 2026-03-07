@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import { useMemo } from 'react';
 import {
   LineChart,
   Line,
@@ -30,9 +30,8 @@ interface ThreatTimelineProps {
 /**
  * ThreatTimeline
  *
- * Visualizes number of blocked/warned scans over time. The component
- * takes a list of scan records and groups the ones where decision is
- * "BLOCK" or "WARN" by minute, then renders a responsive line chart.
+ * Visualizes number of blocked scans over time. The component
+ * groups blocked records into minute buckets and renders a line chart.
  */
 const ThreatTimeline: React.FC<ThreatTimelineProps> = ({ scans }) => {
   const timelineData = useMemo(() => {
