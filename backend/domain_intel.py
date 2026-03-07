@@ -7,6 +7,7 @@ from typing import Dict, List
 from urllib.parse import urlparse
 
 import tldextract
+from domain_intelligence import calculate_domain_trust
 
 SUSPICIOUS_TLDS = {"xyz", "top", "click", "ru", "tk"}
 PHISHING_KEYWORDS = {"login", "verify", "secure", "update", "account", "password"}
@@ -37,35 +38,34 @@ def analyze_url(url: str) -> Dict[str, object]:
         }
     """
     flags: List[str] = []
-    penalty = 0.0
     lowered_url = url.lower()
     host = _extract_host(url)
-
     extracted = tldextract.extract(host)
-    tld = extracted.suffix.lower()
 
-    if tld in SUSPICIOUS_TLDS:
+    if any(host.endswith(f".{tld}") or host == tld for tld in SUSPICIOUS_TLDS):
         flags.append("suspicious_tld")
-        penalty += 0.25
 
     if any(keyword in lowered_url for keyword in PHISHING_KEYWORDS):
         flags.append("phishing_keyword")
-        penalty += 0.25
 
     if _is_ip_address(host):
         flags.append("ip_address_url")
-        penalty += 0.30
 
-    if len(extracted.subdomain) > 30:
+    if len(host) > 30:
         flags.append("long_subdomain")
-        penalty += 0.20
+    if host.count("-") > 3:
+        flags.append("many_hyphens")
+    if sum(c.isdigit() for c in host) > 5:
+        flags.append("numeric_heavy_domain")
+    if str(url).startswith("http://"):
+        flags.append("no_https")
 
-    penalty = min(1.0, penalty)
-    trust_score = max(0, min(100, round((1.0 - penalty) * 100)))
+    trust_score = calculate_domain_trust(url)
+    penalty = round((100 - trust_score) / 100.0, 3)
 
     return {
         "trust_score": trust_score,
-        "risk_penalty": round(penalty, 3),
+        "risk_penalty": penalty,
         "flags": flags,
     }
 

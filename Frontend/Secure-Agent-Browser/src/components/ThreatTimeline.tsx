@@ -35,59 +35,33 @@ interface ThreatTimelineProps {
  * "BLOCK" or "WARN" by minute, then renders a responsive line chart.
  */
 const ThreatTimeline: React.FC<ThreatTimelineProps> = ({ scans }) => {
-  // convert timestamp to minute resolution string (HH:MM)
-  const formatTime = (ts: any): string => {
-    // accept Date-like objects or simple strings
-    if (!ts) return 'unknown';
-    if (typeof ts === 'string') {
-      // assume already hh:mm or ISO
-      const parsed = new Date(ts);
-      if (!isNaN(parsed.getTime())) {
-        const h = parsed.getHours().toString().padStart(2, '0');
-        const m = parsed.getMinutes().toString().padStart(2, '0');
-        return `${h}:${m}`;
-      }
-      return ts;
-    }
-    let date: Date;
-    if (ts.toDate) {
-      date = ts.toDate();
-    } else if (ts instanceof Date) {
-      date = ts;
-    } else {
-      date = new Date(ts);
-    }
-    const h = date.getHours().toString().padStart(2, '0');
-    const m = date.getMinutes().toString().padStart(2, '0');
-    return `${h}:${m}`;
-  };
-
   const timelineData = useMemo(() => {
-    const bucket: Record<string, number> = {};
+    const grouped: Record<string, number> = {};
 
-    const normalizeDecision = (s: ScanRecord): string => {
-      const decision = String(s.decision || s.policy?.decision || '').toUpperCase();
-      if (decision) return decision;
-      if (s.status === 'safe') return 'ALLOW';
-      if (s.status === 'blocked') return 'BLOCK';
-      if (s.status === 'warning') return 'WARN';
-      return '';
-    };
+    scans.forEach((scan) => {
+      const decision = String(scan.decision || scan.policy?.decision || '').toUpperCase();
+      if (decision !== 'BLOCK') return;
 
-    scans.forEach((s) => {
-      const d = normalizeDecision(s);
-      if (d === 'BLOCK' || d === 'WARN') {
-        const rawTime = s.timestamp ?? s.time;
-        const t = formatTime(rawTime);
-        bucket[t] = (bucket[t] || 0) + 1;
+      const rawTime = scan.time ?? scan.timestamp;
+      const date = rawTime?.toDate ? rawTime.toDate() : new Date(rawTime);
+      if (Number.isNaN(date.getTime())) return;
+
+      const time = date.toLocaleTimeString([], {
+        hour: '2-digit',
+        minute: '2-digit',
+      });
+
+      if (!grouped[time]) {
+        grouped[time] = 0;
       }
+      grouped[time]++;
     });
 
-    // convert into array sorted by time
-    const arr = Object.keys(bucket)
-      .map((time) => ({ time, attacks: bucket[time] }))
-      .sort((a, b) => a.time.localeCompare(b.time));
-    return arr;
+    return Object.entries(grouped)
+      .map(([time, count]) => ({
+        time,
+        attacks: count,
+      }));
   }, [scans]);
 
   return (

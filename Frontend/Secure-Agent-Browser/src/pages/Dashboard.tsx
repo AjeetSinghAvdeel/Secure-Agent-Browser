@@ -71,6 +71,8 @@ type Scan = {
   timestamp?: any;
   time?: string;
   risk: number;
+  trust?: number;
+  analysisSummary?: string;
   status?: "safe" | "warning" | "blocked";
   decision?: Decision;
   details?: any;
@@ -86,6 +88,50 @@ type Scan = {
   };
 };
 
+const calculateDomainTrustFallback = (url: string): number => {
+  try {
+    const parsed = new URL(url);
+    const domain = (parsed.hostname || "").toLowerCase();
+    let trust = 100;
+
+    const suspiciousTlds = [
+      ".xyz",
+      ".top",
+      ".gq",
+      ".tk",
+      ".ml",
+      ".cf",
+      ".click",
+      ".work",
+    ];
+
+    if (suspiciousTlds.some((tld) => domain.endsWith(tld))) {
+      trust -= 30;
+    }
+
+    if (parsed.protocol === "http:") {
+      trust -= 15;
+    }
+
+    if (domain.length > 30) {
+      trust -= 10;
+    }
+
+    if ((domain.match(/-/g) || []).length > 3) {
+      trust -= 10;
+    }
+
+    const digits = (domain.match(/[0-9]/g) || []).length;
+    if (digits > 5) {
+      trust -= 10;
+    }
+
+    return Math.max(0, Math.min(100, trust));
+  } catch {
+    return 50;
+  }
+};
+
 /* ---------------------------------- */
 /* DASHBOARD */
 /* ---------------------------------- */
@@ -96,29 +142,9 @@ const Dashboard = () => {
   const [scanInput, setScanInput] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
-  const [expandedScanId, setExpandedScanId] = useState<string | null>(null);
+  const [expandedScan, setExpandedScan] = useState<string | null>(null);
   const [scanHistory, setScanHistory] = useState<Scan[]>([]);
   const [latestThreat, setLatestThreat] = useState<Scan | null>(null);
-  const [panelState, setPanelState] = useState<DashboardPanelState>({
-    riskScore: 82,
-    trustScore: 45,
-    decision: "BLOCK",
-    indicators: [
-      { name: "prompt injection", detected: true, severity: "critical" },
-      { name: "hidden payload", detected: true, severity: "high" },
-      { name: "phishing", detected: false },
-      { name: "obfuscation", detected: false },
-    ],
-    explanation: {
-      summary:
-        "Page blocked due to prompt injection patterns and suspicious domain.",
-      reasons: [
-        "ML model detected high-confidence prompt injection patterns",
-        "Hidden DOM elements detected (often used for malicious purposes)",
-        "Domain uses suspicious top-level domain",
-      ],
-    },
-  });
 
   const formatTime = (ts: any) => {
     if (ts?.toDate) return ts.toDate().toLocaleString();
@@ -188,6 +214,20 @@ const Dashboard = () => {
     return "warning";
   };
 
+  const resolveTrustScore = (scan: Scan): number => {
+    const rawTrust = (scan as any).trust ?? (scan as any).trust_score ?? (scan as any).domainTrust;
+    if (typeof rawTrust === "number" && Number.isFinite(rawTrust)) {
+      return Math.max(0, Math.min(100, rawTrust));
+    }
+    if (typeof rawTrust === "string" && rawTrust.trim() !== "") {
+      const parsed = Number(rawTrust);
+      if (Number.isFinite(parsed)) {
+        return Math.max(0, Math.min(100, parsed));
+      }
+    }
+    return calculateDomainTrustFallback(scan.url || "");
+  };
+
   const scanTimeMs = (scan: Scan): number => {
     const raw = scan.time ?? scan.timestamp;
     if (!raw) return 0;
@@ -247,29 +287,6 @@ const Dashboard = () => {
     return () => unsubscribe();
   }, []);
 
-  const updateRiskPanel = (data: any) => {
-    const decision = normalizeDecision(data?.decision);
-    const indicators = Array.isArray(data?.indicators) ? data.indicators : [];
-    const reasons = Array.isArray(data?.details?.reasons)
-      ? data.details.reasons
-      : indicators;
-
-    setPanelState({
-      riskScore: Number(data?.risk ?? 0),
-      trustScore: Number(data?.trust ?? 0),
-      decision,
-      indicators: indicators.map((name: string) => ({
-        name,
-        detected: true,
-        severity: severityFromIndicator(name),
-      })),
-      explanation: {
-        summary: String(data?.explanation || "No explanation available."),
-        reasons,
-      },
-    });
-  };
-
   const scanUrl = async (url: string) => {
     const target = url.trim();
     if (!target) {
@@ -292,12 +309,13 @@ const Dashboard = () => {
         throw new Error(`Scan request failed (${res.status})`);
       }
       const data = await res.json();
-      updateRiskPanel(data);
       const decision = normalizeDecision(data?.decision);
       const indicators = Array.isArray(data?.indicators) ? data.indicators : [];
       await addDoc(collection(db, "scans"), {
         url: String(data?.url || target),
         risk: Number(data?.risk ?? 0),
+        trust: Number(data?.trust ?? 0),
+        analysisSummary: String(data?.explanation || "No explanation available."),
         decision,
         status: decisionToStatus(decision),
         details: {
@@ -340,6 +358,10 @@ const Dashboard = () => {
                 Real-time threat monitoring & analysis
               </p>
             </div>
+          </div>
+
+          <div className="mb-8">
+            <ThreatTimeline scans={scanHistory} />
           </div>
 
           {/* Stats */}
@@ -394,21 +416,6 @@ const Dashboard = () => {
             )}
           </div>
 
-          <div className="mb-8">
-            <RiskIntelligencePanel
-              riskScore={panelState.riskScore}
-              trustScore={panelState.trustScore}
-              decision={panelState.decision}
-              indicators={panelState.indicators}
-              explanation={panelState.explanation}
-            />
-          </div>
-
-          {/* Threat timeline showing recent blocks/warns */}
-          <div className="mb-8">
-            <ThreatTimeline scans={scanHistory} />
-          </div>
-
           {/* Scan Table */}
           <div className="glass rounded-xl overflow-hidden overflow-x-auto">
             <table className="w-full text-sm table-fixed">
@@ -426,14 +433,17 @@ const Dashboard = () => {
                   const status = scanStatus(scan);
                   const Icon = statusIcons[status];
                   const cfg = statusConfig[status];
-                  const expanded = expandedScanId === scan.id;
+                  const expanded = expandedScan === scan.id;
+                  const decision = scanDecision(scan);
+                  const indicators = Array.isArray(scan?.details?.reasons) ? scan.details.reasons : [];
+                  const summary = String(scan.analysisSummary || scan?.details?.summary || "No explanation available.");
 
                   return (
                     <Fragment key={scan.id}>
                       <tr className="border-b">
                         <td
                           title={scan.url}
-                          className="px-6 py-3 font-mono text-xs max-w-[400px] break-all [overflow-wrap:anywhere]"
+                          className="px-6 py-3 font-mono text-xs max-w-[400px] break-all"
                         >
                           {scan.url}
                         </td>
@@ -457,9 +467,7 @@ const Dashboard = () => {
                         </td>
                         <td className="px-4 py-3 text-center">
                           <button
-                            onClick={() =>
-                              setExpandedScanId(expanded ? null : scan.id)
-                            }
+                            onClick={() => setExpandedScan(expanded ? null : scan.id)}
                             className="text-xs font-mono text-primary flex items-center gap-1 mx-auto"
                           >
                             {expanded ? <ChevronUp /> : <ChevronDown />}
@@ -471,47 +479,33 @@ const Dashboard = () => {
                       {expanded && (
                         <tr className="bg-secondary/20">
                           <td colSpan={5} className="px-6 py-4 text-xs space-y-3">
-
-                            {/* Confidence */}
-                            <p className="font-mono">
-                              <strong>Confidence:</strong>{" "}
-                              {scan.details?.confidence || "unknown"}
-                            </p>
-
-                            {/* 🔐 POLICY DECISION */}
-                            {scan.policy && (
-                              <p className="font-mono">
-                                <strong>Policy Decision:</strong>{" "}
-                                <span className="font-bold">
-                                  {scan.policy.decision}
-                                </span>{" "}
-                                — {scan.policy.reason}
-                              </p>
-                            )}
-
-                            {/* 🤖 AGENT ACTION */}
-                            {scan.agent_action && (
-                              <p className="font-mono">
-                                <strong>Agent Action:</strong>{" "}
-                                {scan.agent_action.type}
-                                {scan.agent_action.fields?.length
-                                  ? ` (${scan.agent_action.fields.join(", ")})`
-                                  : ""}
-                              </p>
-                            )}
-
-                            {/* Reasons */}
-                            <div>
-                              <p className="font-mono mb-1">
-                                <strong>Analysis Reasons:</strong>
-                              </p>
-                              <ul className="list-disc pl-4 space-y-1">
-                                {scan.details?.reasons?.map(
-                                  (r: string, i: number) => (
-                                    <li key={i}>{r}</li>
-                                  )
-                                )}
-                              </ul>
+                            <div className="space-y-6">
+                              <RiskIntelligencePanel
+                                riskScore={Number(scan.risk ?? 0)}
+                                trustScore={resolveTrustScore(scan)}
+                                decision={decision}
+                                indicators={indicators.map((name: string) => ({
+                                  name,
+                                  detected: true,
+                                  severity: severityFromIndicator(String(name)),
+                                }))}
+                                explanation={{
+                                  summary,
+                                  reasons: indicators,
+                                }}
+                              />
+                              <div>
+                                <p className="font-mono mb-1">
+                                  <strong>Analysis Reasons:</strong>
+                                </p>
+                                <ul className="list-disc pl-4 space-y-1">
+                                  {indicators.map(
+                                    (r: string, i: number) => (
+                                      <li key={i}>{r}</li>
+                                    )
+                                  )}
+                                </ul>
+                              </div>
                             </div>
 
                           </td>
