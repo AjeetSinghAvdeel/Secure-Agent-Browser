@@ -36,30 +36,34 @@ interface ThreatTimelineProps {
  */
 const ThreatTimeline: React.FC<ThreatTimelineProps> = ({ scans }) => {
   const timelineData = useMemo(() => {
-    const grouped: Record<string, number> = {};
+    const grouped: Record<number, number> = {};
 
     scans.forEach((scan) => {
       const decision = String(scan.decision || scan.policy?.decision || '').toUpperCase();
-      if (decision !== 'BLOCK') return;
+      const isBlocked = decision === 'BLOCK' || String(scan.status || '').toLowerCase() === 'blocked';
+      if (!isBlocked) return;
 
       const rawTime = scan.time ?? scan.timestamp;
       const date = rawTime?.toDate ? rawTime.toDate() : new Date(rawTime);
       if (Number.isNaN(date.getTime())) return;
 
-      const time = date.toLocaleTimeString([], {
-        hour: '2-digit',
-        minute: '2-digit',
-      });
+      // Normalize to minute buckets using epoch ms to keep chronological sorting correct.
+      const minuteBucket = Math.floor(date.getTime() / 60000) * 60000;
 
-      if (!grouped[time]) {
-        grouped[time] = 0;
+      if (!grouped[minuteBucket]) {
+        grouped[minuteBucket] = 0;
       }
-      grouped[time]++;
+      grouped[minuteBucket]++;
     });
 
     return Object.entries(grouped)
-      .map(([time, count]) => ({
-        time,
+      .sort(([a], [b]) => Number(a) - Number(b))
+      .map(([bucketMs, count]) => ({
+        time: new Date(Number(bucketMs)).toLocaleTimeString([], {
+          hour: '2-digit',
+          minute: '2-digit',
+          hour12: false,
+        }),
         attacks: count,
       }));
   }, [scans]);

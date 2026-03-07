@@ -1,4 +1,4 @@
-const API_URL = "http://localhost:8000/analyze_url";
+const API_URL = "http://localhost:8000/scan";
 const BYPASS_TTL_MS = 2 * 60 * 1000;
 
 const pendingByTab = new Map();
@@ -60,44 +60,54 @@ function toWarningUrl(result, url, mode) {
   return chrome.runtime.getURL(`warning.html?${params.toString()}`);
 }
 
-async function handleNavigation(details) {
-  const { tabId, frameId, url } = details;
-  if (frameId !== 0 || tabId < 0 || shouldSkip(url)) return;
-  if (consumeBypass(tabId, url)) return;
+function scheduleScan(details) {
+  const { tabId, url } = details;
+  const pendingUrl = pendingByTab.get(tabId);
+  if (pendingUrl && pendingUrl === url) {
+    return;
+  }
 
-  const inflight = pendingByTab.get(tabId);
-  if (inflight && inflight.url === url) return;
+  pendingByTab.set(tabId, url);
 
-  const request = (async () => {
+  (async () => {
     try {
       const result = await analyzeUrl(url);
       const decision = String(result?.decision || "WARN").toUpperCase();
 
-      if (decision === "ALLOW") {
-        return;
-      }
-
-      if (decision === "WARN") {
-        const warningUrl = toWarningUrl(result, url, "warn");
-        await chrome.tabs.update(tabId, { url: warningUrl });
-        return;
-      }
-
       if (decision === "BLOCK") {
-        const warningUrl = toWarningUrl(result, url, "block");
-        await chrome.tabs.update(tabId, { url: warningUrl });
+        const warningPage = toWarningUrl(result, url, "block");
+        await chrome.tabs.update(tabId, { url: warningPage });
+        return;
       }
+
+      // SAFE/WARN: no redirect needed.
     } catch (error) {
-      console.error("SecureAgent analyze failure", error);
+      console.error("SecureAgent scan failed", error);
+      // Fail-open for normal navigation when scanner is unavailable.
     } finally {
       pendingByTab.delete(tabId);
     }
   })();
-
-  pendingByTab.set(tabId, { url, request });
 }
 
-chrome.webNavigation.onCommitted.addListener(handleNavigation);
+chrome.webNavigation.onCommitted.addListener(
+  function (details) {
+    if (details.frameId !== 0) {
+      return;
+    }
+
+    const { tabId, url } = details;
+    if (tabId < 0 || shouldSkip(url)) {
+      return;
+    }
+
+    if (consumeBypass(tabId, url)) {
+      return;
+    }
+
+    scheduleScan(details);
+  }
+);
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message?.type === "SECUREAGENT_PROCEED") {

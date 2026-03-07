@@ -5,13 +5,13 @@
   "description": "AI-powered pre-navigation web threat detection",
   "permissions": [
     "tabs",
-    "webNavigation",
     "activeTab",
-    "scripting",
+    "webNavigation",
     "storage"
   ],
   "host_permissions": [
-    "<all_urls>"
+    "<all_urls>",
+    "http://localhost:8000/*"
   ],
   "background": {
     "service_worker": "background.js"
