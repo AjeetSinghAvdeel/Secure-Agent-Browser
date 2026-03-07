@@ -56,11 +56,10 @@ PROMPT_INJECTION_PHRASES = (
 )
 PHISHING_PAGE_TERMS = (
     "verify your account",
-    "password",
-    "one-time code",
-    "account security",
     "suspended unless",
     "verify now",
+    "confirm your identity",
+    "unusual login attempt",
 )
 SUSPICIOUS_SCRIPT_TERMS = (
     "eval(",
@@ -68,6 +67,16 @@ SUSPICIOUS_SCRIPT_TERMS = (
     "fromcharcode(",
     "hex_payload",
     "base64_blob",
+)
+TRUSTED_DOMAIN_SUFFIXES = (
+    "google.com",
+    "firebase.google.com",
+    "github.com",
+    "microsoft.com",
+    "apple.com",
+    "cloudflare.com",
+    "amazon.com",
+    "wikipedia.org",
 )
 
 
@@ -124,7 +133,14 @@ def _semantic_signal(html: str) -> Dict[str, Any]:
         flags.append("phishing_content_pattern")
         score += 0.35
 
-    if "<form" in text and "password" in text:
+    has_password_form = "<form" in text and "password" in text
+    has_phish_context = (
+        any(term in text for term in PHISHING_PAGE_TERMS)
+        or "verify" in text
+        or "suspend" in text
+        or "urgent" in text
+    )
+    if has_password_form and has_phish_context:
         flags.append("credential_harvest_form")
         score += 0.20
 
@@ -133,6 +149,49 @@ def _semantic_signal(html: str) -> Dict[str, Any]:
         score += 0.25
 
     return {"score": min(1.0, round(score, 3)), "flags": flags}
+
+
+def _host_context(url: str) -> Dict[str, Any]:
+    host = (urlparse(url).hostname or "").lower()
+    is_trusted = any(
+        host == suffix or host.endswith(f".{suffix}")
+        for suffix in TRUSTED_DOMAIN_SUFFIXES
+    )
+    return {"host": host, "is_trusted": is_trusted}
+
+
+def _contextualize_flags(
+    semantic_flags: List[str],
+    obfuscation_flags: List[str],
+    *,
+    is_trusted: bool,
+    has_intel: bool,
+    domain_flags: List[str],
+) -> Dict[str, List[str]]:
+    # On trusted domains with no threat-intel hit, suppress noisy generic indicators.
+    if not is_trusted or has_intel:
+        return {
+            "semantic_flags": semantic_flags,
+            "obfuscation_flags": obfuscation_flags,
+        }
+
+    refined_semantic = [
+        f for f in semantic_flags
+        if f in {"prompt_injection_pattern", "credential_harvest_form"}
+    ]
+    suspicious_domain_present = bool(
+        set(domain_flags).intersection(
+            {"suspicious_tld", "ip_address_url", "many_hyphens", "numeric_heavy_domain"}
+        )
+    )
+    refined_obfuscation = [
+        f for f in obfuscation_flags
+        if f in {"base64_blob", "hex_payload"} or suspicious_domain_present
+    ]
+    return {
+        "semantic_flags": refined_semantic,
+        "obfuscation_flags": refined_obfuscation,
+    }
 
 
 def _local_simulation_domain_adjustment(url: str, domain_data: Dict[str, Any]) -> Dict[str, Any]:
@@ -156,6 +215,8 @@ def _apply_signal_boosts(
     obfuscation_flags: List[str],
     semantic_flags: List[str],
     intel: Dict[str, Any] | None,
+    *,
+    is_trusted: bool,
 ) -> Dict[str, Any]:
     total = float(risk_data.get("total_risk", 0.0))
 
@@ -171,6 +232,14 @@ def _apply_signal_boosts(
         total += 0.10
     if intel:
         total += min(0.30, 0.20 * float(intel.get("confidence", 0.9)))
+
+    # Trusted domains should not be escalated by weak heuristic-only signals.
+    if is_trusted and not intel:
+        if "prompt_injection_pattern" not in semantic_flags:
+            total = min(
+                total,
+                float(risk_data.get("total_risk", 0.0)) + 0.06,
+            )
 
     risk_data["total_risk"] = round(min(1.0, total), 4)
     return risk_data
@@ -247,6 +316,7 @@ def _run_pipeline(target_url: str) -> Dict[str, Any]:
 
     # 3. Run ML detection
     ml_score = _predict_ml(html)
+    host_ctx = _host_context(target_url)
     semantic_data = _semantic_signal(html)
     semantic_score = max(float(ml_score), float(semantic_data["score"]))
 
@@ -271,12 +341,24 @@ def _run_pipeline(target_url: str) -> Dict[str, Any]:
     if intel and intel.get("threat"):
         domain_flags.append(f"threat_intel_{intel['threat']}")
 
+    obfuscation_flags = list(obfuscation_data.get("flags", []))
+    refined = _contextualize_flags(
+        semantic_flags=semantic_flags,
+        obfuscation_flags=obfuscation_flags,
+        is_trusted=bool(host_ctx["is_trusted"]),
+        has_intel=bool(intel),
+        domain_flags=domain_flags,
+    )
+    semantic_flags = refined["semantic_flags"]
+    obfuscation_flags = refined["obfuscation_flags"]
+
     risk_data = _apply_signal_boosts(
         risk_data=risk_data,
         domain_flags=domain_flags,
-        obfuscation_flags=list(obfuscation_data.get("flags", [])),
+        obfuscation_flags=obfuscation_flags,
         semantic_flags=semantic_flags,
         intel=intel,
+        is_trusted=bool(host_ctx["is_trusted"]),
     )
     policy = _evaluate_policy(risk_data["total_risk"])
 
@@ -284,7 +366,7 @@ def _run_pipeline(target_url: str) -> Dict[str, Any]:
     explanation = _build_explanation(
         ml_score=max(float(ml_score), semantic_score),
         domain_flags=domain_flags + semantic_flags,
-        obfuscation_flags=list(obfuscation_data.get("flags", [])),
+        obfuscation_flags=obfuscation_flags,
         risk_data=risk_data,
         decision=str(policy.get("decision", "WARN")),
     )
@@ -297,7 +379,7 @@ def _run_pipeline(target_url: str) -> Dict[str, Any]:
         "indicators": [
             *domain_flags,
             *semantic_flags,
-            *list(obfuscation_data.get("flags", [])),
+            *obfuscation_flags,
         ],
         "explanation": explanation["summary"],
         "timestamp": datetime.now(timezone.utc).isoformat(),

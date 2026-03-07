@@ -7,6 +7,7 @@
     "tabs",
     "activeTab",
     "webNavigation",
+    "notifications",
     "storage"
   ],
   "host_permissions": [
@@ -15,6 +16,11 @@
   ],
   "background": {
     "service_worker": "background.js"
+  },
+  "icons": {
+    "16": "icons/secureagent-128.png",
+    "48": "icons/secureagent-128.png",
+    "128": "icons/secureagent-128.png"
   },
   "content_scripts": [
     {
@@ -25,11 +31,16 @@
   ],
   "web_accessible_resources": [
     {
-      "resources": ["warning.html", "warning.js"],
+      "resources": ["warning.html", "warning.js", "icons/secureagent.svg", "icons/secureagent-128.png"],
       "matches": ["<all_urls>"]
     }
   ],
   "action": {
-    "default_title": "SecureAgent"
+    "default_title": "SecureAgent",
+    "default_icon": {
+      "16": "icons/secureagent-128.png",
+      "48": "icons/secureagent-128.png",
+      "128": "icons/secureagent-128.png"
+    }
   }
 }
