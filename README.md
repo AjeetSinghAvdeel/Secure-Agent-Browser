@@ -1,165 +1,233 @@
-#  SecureAgent Browser: Runtime-Aware AI Security
+# SecureAgent: AI-Powered Intelligent Web Threat Detection
 
-**A next-generation AI system for detecting and preventing malicious web environments in real-time.**
+SecureAgent is an end-to-end web threat defense system that analyzes URLs, scores risk, enforces policy decisions (`ALLOW`, `WARN`, `BLOCK`), and visualizes results in a live dashboard.
 
-[![Python](https://img.shields.io/badge/Python-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org/)
-[![FastAPI](https://img.shields.io/badge/FastAPI-005571?style=for-the-badge&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
-[![React](https://img.shields.io/badge/React-20232A?style=for-the-badge&logo=react&logoColor=61DAFB)](https://reactjs.org/)
-[![TypeScript](https://img.shields.io/badge/TypeScript-007ACC?style=for-the-badge&logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
-[![Selenium](https://img.shields.io/badge/Selenium-43B02A?style=for-the-badge&logo=selenium&logoColor=white)](https://www.selenium.dev/)
-
----
-
-##  The Problem
-
-Modern cyber-attacks have evolved beyond simple, detectable malware. Threats like **phishing, clickjacking, prompt injection, and credential harvesting** now leverage dynamic, runtime manipulations that are invisible to traditional security tools.
-
--   **Dynamic UI & DOM Manipulation:** Attacks that only appear during user interaction.
--   **Hidden Overlays & Event Hijacking:** Invisible UI elements that steal clicks and data.
--   **Deceptive User Flows:** Legitimate-looking forms and flows designed to deceive.
--   **Network-Level Exfiltration:** Data悄悄 sent to malicious servers.
-
-Static scanners and URL reputation systems are blind to these threats because the danger is only revealed **at runtime**.
+It includes:
+- FastAPI backend threat pipeline
+- React dashboard (real-time scan monitoring)
+- Chrome extension (pre-navigation threat protection)
+- Safe local threat simulation lab
 
 ---
 
-##  Our Solution: SecureAgent
+## Overview
 
-SecureAgent is an AI-powered, runtime-aware browser security system built to counter these advanced threats. Instead of asking, "Is this source code malicious?", SecureAgent asks:
+SecureAgent protects users and AI agents before risky pages are trusted.
 
-> **“Is it safe for an autonomous agent to interact with this page *right now*?”**
+Core flow:
 
-It does this by:
-1.  **Opening** web pages in a real, instrumented browser.
-2.  **Observing** the page's actual behavior as a user would see it.
-3.  **Analyzing** runtime data using a multi-layered intelligence engine.
-4.  **Assigning** an explainable risk score and recommending an action.
-
----
-
-##  Key Features
-
--   **Runtime-First Analysis:** Prioritizes live browser behavior over static source code.
--   **Multi-Layered Intelligence:** Combines rule-based detectors, a machine learning model, and an LLM reasoner for comprehensive threat analysis.
--   **Explainable AI (XAI):** Delivers clear, human-readable explanations for every security decision—no black boxes.
--   **Agent Action Mediation:** Goes beyond detection to provide actionable policy decisions: `ALLOW`, `WARN`, or `BLOCK`.
--   **Realistic Attack Simulation:** Includes a suite of test pages to validate detection capabilities in a controlled environment.
--   **Live Security Dashboard:** A real-time interface to monitor scans, view threats, and understand risks.
-
----
-
-##  System Architecture
-
-The system is designed as a pipeline that flows from the user/agent interaction down to a live security dashboard.
-
-```
-User / Agent
-     │
-     ▼
-Frontend (React + TypeScript)
-     │
-     ▼
-FastAPI Backend (Python)
-     │
-     ├─▶ Selenium Browser (Instrumented)
-     │   ├─ DOM Mutation Tracking
-     │   ├─ Hidden UI Detection
-     │   ├─ Event Hijack Detection
-     │   └─ Network Interception
-     │
-     ├─▶ Static Analysis (HTML, Forms, Keywords)
-     ├─▶ ML Model (Statistical Risk Patterns)
-     ├─▶ LLM Reasoner (Intent & Context Analysis)
-     ├─▶ Risk Engine (Explainable Scoring)
-     └─▶ Policy Engine (Agent Decision Logic)
-     │
-     ▼
-Firestore (Real-time Database)
-     │
-     ▼
-Security Dashboard (Live Updates)
+```text
+User Browser
+   ↓
+SecureAgent Extension
+   ↓
+SecureAgent Backend (FastAPI)
+   ↓
+Threat Detection Pipeline
+   ↓
+Risk Engine
+   ↓
+Policy Engine
+   ↓
+Decision (ALLOW / WARN / BLOCK)
+   ↓
+Dashboard Visualization
 ```
 
 ---
 
-##  Technology Stack
+## Key Features
 
--   **Frontend:** React, TypeScript, Tailwind CSS, Framer Motion, Lucide Icons, Firebase Firestore
--   **Backend:** FastAPI (Python), Selenium, Chromium, BeautifulSoup
--   **Intelligence Layer:**
-    -   Custom rule-based detectors (Injection, Phishing, Hidden UI)
-    -   Machine Learning model for statistical anomaly detection
-    -   LLM-based intent reasoning
-    -   Explainable risk-scoring engine
-    -   Policy-based agent decision system
+- Pre-navigation extension scanning
+- URL + content risk scoring
+- Explainable decisions with indicators
+- Real-time scan feed (Firestore-backed dashboard)
+- Threat timeline visualization (blocked events)
+- Safe simulation pages for testing detections
 
 ---
 
-##  Detection Capabilities
+## Project Structure
 
-SecureAgent is equipped to detect a wide range of modern web threats:
-
-| Threat Type                     | Detection Method                                                                                             |
-| ------------------------------- | ------------------------------------------------------------------------------------------------------------ |
-| **Prompt Injection**            | Identifies malicious instruction patterns like "Ignore previous instructions" or "Act as system administrator." |
-| **Hidden UI & Clickjacking**    | Uncovers invisible overlays, zero-opacity elements, hidden iframes, and other deceptive UI manipulations.        |
-| **Phishing & Credential Theft** | Flags pages impersonating trusted brands, using deceptive forms, or operating on suspicious domains.           |
-| **Runtime Behavior Analysis**   | Monitors for high-frequency DOM mutations, click interception, and event listener hijacking.                 |
-| **Network Exfiltration**        | Detects cross-origin data transfers and suspicious network traffic related to credential submission.         |
-
----
-
-##  Security Engine: Risk & Policy
-
-#### Risk Scoring
-Each scan produces a clear, actionable security assessment:
--   **Risk Score (0–100):** A quantitative measure of the threat level.
--   **Confidence Level:** The certainty of the assessment (Low, Medium, High).
--   **Primary Threat Signal:** The most significant threat detected.
--   **Attack Chain Explanation:** A human-readable narrative of the findings.
-
-> **Design Principle:** Runtime and network behavior always override signals from the ML/LLM. A legitimate website is never blocked based on language alone.
-
-#### Policy Engine
-SecureAgent simulates an agent's potential actions and decides on a policy:
--    BLOCK: High-risk environments, especially those involving credential harvesting.
--    WARN: Suspicious environments where caution is advised.
--    ALLOW: Safe environments with no malicious indicators.
-
----
-
-##  Live Security Dashboard
-
-The dashboard offers a real-time, transparent view of the system's operations, providing:
--   Live scan updates and status breakdowns (Safe, Warning, Blocked).
--   Expandable, detailed analysis for every scan.
--   Full explainability of policy decisions and recommended agent actions.
-
-This makes the entire system auditable and easy to understand.
-
----
-
-##  Attack Simulations
-
-The project includes local, realistic test websites to demonstrate and validate detection of:
--   Prompt injection attacks
--   Hidden UI and clickjacking
--   Phishing login portals
-
-These simulations prove the system's effectiveness in a hands-on, verifiable way.
+```text
+Secure-Agent-Browser/
+├── backend/                         # FastAPI + detection integration
+│   ├── api.py                       # Main API (/analyze_url, /scan, /scan_history)
+│   ├── scanner.py                   # Page fetcher
+│   ├── threat_intel.py              # Threat intel lookups
+│   ├── domain_intel.py              # Domain analysis wrapper
+│   ├── domain_intelligence.py       # Deterministic domain trust scoring
+│   ├── obfuscation.py               # Obfuscation heuristics
+│   ├── risk.py                      # Risk scoring engine
+│   ├── policy_engine.py             # Policy decision engine
+│   ├── explainability.py            # Explanation generation
+│   └── ml_model.py                  # ML signal
+│
+├── Frontend/Secure-Agent-Browser/   # React + Vite dashboard
+│   ├── src/pages/Dashboard.tsx
+│   ├── src/components/
+│   │   ├── RiskIntelligencePanel.tsx
+│   │   ├── ThreatTimeline.tsx
+│   │   └── ThreatAlert.tsx
+│   └── src/lib/firebase.ts
+│
+├── secureagent-extension/           # Chrome extension (Manifest V3)
+│   ├── manifest.json
+│   ├── background.js
+│   ├── content.js
+│   ├── warning.html
+│   ├── warning.js
+│   └── icons/
+│
+├── malicious-simulator-lab/         # Safe local test pages
+│   ├── index.html
+│   └── pages/
+│       ├── phishing-login.html
+│       ├── prompt-injection.html
+│       ├── obfuscated-payload.html
+│       └── combined-threat.html
+│
+└── attacks/                         # Additional local attack fixtures
+```
 
 ---
 
-##  Why SecureAgent Stands Out
+## Backend API
 
--   **Runtime-Aware:** It sees what users and agents see, not just what static analysis reveals.
--   **Multi-Layered Intelligence:** Fuses rules, ML, and LLM insights for robust detection.
--   **Truly Explainable:** Provides clear justifications for its decisions.
--   **Agent-Centric Security:** Designed for the new era of autonomous web interaction.
--   **End-to-End Solution:** From the browser to the dashboard, it's a complete, integrated system.
+Base URL: `http://localhost:8000`
+
+### `POST /analyze_url`
+Analyzes a URL and returns threat decision.
+
+Request:
+```json
+{ "url": "https://example.com" }
+```
+
+Response shape:
+```json
+{
+  "url": "https://example.com",
+  "risk": 42,
+  "decision": "WARN",
+  "trust": 83,
+  "indicators": ["..."],
+  "explanation": "...",
+  "timestamp": "..."
+}
+```
+
+### `POST /scan`
+Compatibility alias to `/analyze_url` (used by extension/dashboard logging flow).
+
+### `GET /scan_history`
+Returns in-memory recent scans (local/dev support).
 
 ---
 
-##  Disclaimer
+## Dashboard (React)
 
-This project is intended strictly for educational and defensive security research purposes. All malicious pages are simulated and run locally in a controlled environment.
+Main page: `Frontend/Secure-Agent-Browser/src/pages/Dashboard.tsx`
+
+Capabilities:
+- URL scan input
+- Real-time Firestore scan table
+- Expandable scan details
+- Per-scan risk intelligence panel
+- Threat timeline (blocked events)
+- Threat banner for latest blocked detection
+
+---
+
+## Extension (Chrome MV3)
+
+Folder: `secureagent-extension/`
+
+Behavior:
+- Scans on navigation using backend `/scan`
+- `BLOCK` / `WARN` routes to extension warning page
+- `ALLOW` keeps browsing and shows safe banner/notification
+- Preserves scan logging flow for dashboard visibility
+
+---
+
+## Safe Threat Simulation Lab
+
+Folder: `malicious-simulator-lab/`
+
+Run:
+```bash
+cd malicious-simulator-lab
+python3 -m http.server 8099
+```
+
+Test URLs:
+- `http://[::1]:8099/pages/phishing-login.html`
+- `http://[::1]:8099/pages/prompt-injection.html`
+- `http://[::1]:8099/pages/obfuscated-payload.html`
+- `http://[::1]:8099/pages/combined-threat.html`
+
+Note: These are safe simulations for detector testing, not live malicious payloads.
+
+---
+
+## Local Setup
+
+## 1) Backend
+
+From repo root:
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install fastapi uvicorn requests tldextract pyyaml scikit-learn
+uvicorn backend.api:app --reload --host 0.0.0.0 --port 8000
+```
+
+## 2) Frontend
+
+```bash
+cd Frontend/Secure-Agent-Browser
+npm install
+npm run dev
+```
+
+## 3) Extension
+
+1. Open `chrome://extensions`
+2. Enable Developer Mode
+3. Click **Load unpacked**
+4. Select `secureagent-extension/`
+5. Reload extension after script/manifest changes
+
+---
+
+## Detection Signals (High Level)
+
+- Prompt-injection patterns
+- Hidden instructions
+- Obfuscation markers (base64/hex/hidden DOM/unicode)
+- Domain intelligence trust penalties
+- Threat intel matches
+- ML + semantic risk fusion with policy evaluation
+
+---
+
+## Security + Ethics
+
+This project is for defensive security testing and education.
+Use only in controlled/local environments and with explicit authorization.
+
+---
+
+## Troubleshooting
+
+- Extension service worker inactive:
+  - Open `chrome://extensions` → SecureAgent → Reload
+- No scans showing in dashboard:
+  - Verify backend running on `:8000`
+  - Verify Firestore config in `src/lib/firebase.ts`
+- Extension warning page not appearing:
+  - Confirm extension can reach `http://localhost:8000/scan`
+- Frontend build warning about CSS `@import` order:
+  - Existing non-blocking warning in current project setup
+
