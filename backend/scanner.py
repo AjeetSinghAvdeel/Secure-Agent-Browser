@@ -1,237 +1,58 @@
-from bs4 import BeautifulSoup
-from urllib.parse import urlparse
-from risk import calculate_risk
-from ml_model import predict_attack
-from llm_reasoner import analyze_intent
+from __future__ import annotations
+
+from pathlib import Path
+
+import requests
+
+BACKEND_DIR = Path(__file__).resolve().parent
+BACKEND_ATTACKS_DIR = BACKEND_DIR / "attacks"
+ROOT_ATTACKS_DIR = BACKEND_DIR.parent / "attacks"
 
 
-BRAND_DOMAINS = {
-    "google": ["google.com", "accounts.google.com"],
-    "github": ["github.com"],
-    "facebook": ["facebook.com"],
-    "instagram": ["instagram.com"],
-    "microsoft": ["microsoft.com", "live.com"],
-    "apple": ["apple.com", "icloud.com"],
-}
-
-INJECTION_KEYWORDS = [
-    "ignore previous",
-    "ignore all",
-    "act as system",
-    "admin mode",
-    "override",
-    "send password",
-    "reveal secret",
-    "root access",
-    "bypass security",
-    "dump database",
-]
-
-HIDDEN_STYLES = [
-    "display:none",
-    "visibility:hidden",
-    "opacity:0",
-    "font-size:0",
-    "left:-9999px",
-]
+class ScanPipelineError(Exception):
+    pass
 
 
-# -------------------------------
-# HTML Processing
-# -------------------------------
-def extract_text(html):
-    soup = BeautifulSoup(html, "html.parser")
-    for tag in soup(["script", "style"]):
-        tag.decompose()
-    text = soup.get_text(separator=" ").lower()
-    return soup, text
+def _load_attack_file(url: str) -> str:
+    filename = Path(url).name
+    for base_dir in (BACKEND_ATTACKS_DIR, ROOT_ATTACKS_DIR):
+        candidate = (base_dir / filename).resolve()
+        if candidate.parent == base_dir.resolve() and candidate.exists():
+            return candidate.read_text(encoding="utf-8", errors="ignore")
+    raise ScanPipelineError(f"Attack file not found for path: {url}")
 
 
-def detect_injection(text):
-    return [w for w in INJECTION_KEYWORDS if w in text]
-
-
-def detect_hidden(soup):
-    hidden = []
-    for tag in soup.find_all(style=True):
-        style = tag.get("style", "").replace(" ", "").lower()
-        for rule in HIDDEN_STYLES:
-            if rule in style:
-                hidden.append("Hidden element detected")
-                break
-        if (
-            ("position:fixed" in style or "position:absolute" in style)
-            and "opacity:0" in style
-        ):
-            hidden.append("Possible clickjacking overlay detected")
-
-    for iframe in soup.find_all("iframe"):
-        style = iframe.get("style", "").lower()
-        if "display:none" in style or "opacity:0" in style:
-            hidden.append("Hidden iframe detected (clickjacking)")
-    return hidden
-
-
-def detect_phishing(soup, page_url, text):
-    findings = []
-    parsed = urlparse(page_url)
-    domain = parsed.netloc.lower()
-
-    has_password_form = any(
-        f.find("input", {"type": "password"})
-        for f in soup.find_all("form")
-    )
-
-    if not has_password_form:
-        return []
-
-    for brand, allowed_domains in BRAND_DOMAINS.items():
-        if brand in text and not any(domain.endswith(d) for d in allowed_domains):
-            findings.append(
-                f"Possible phishing: impersonates {brand} on {domain}"
-            )
-    return findings
-
-
-# -------------------------------
-# Runtime Behavior Analysis
-# -------------------------------
-def analyze_behavior(behavior):
-    risk = 0
-    reasons = []
-
-    if not behavior:
-        return 0, []
-
-    if behavior.get("domMutations", 0) > 20:
-        risk += 15
-        reasons.append("High runtime DOM mutation volume detected")
-
-    if behavior.get("suspiciousOverlays", 0) > 2:
-        risk += 25
-        reasons.append("Suspicious runtime UI overlays detected")
-
-    if behavior.get("clickInterceptors", 0) > 0:
-        risk += 15
-        reasons.append("Click interception behavior detected")
-
-    if behavior.get("eventHijacks", 0) > 3:
-        risk += 15
-        reasons.append("User interaction hijacking detected")
-
-    return risk, reasons
-
-
-# -------------------------------
-# 🔥 Network Behavior Analysis (STEP 4)
-# -------------------------------
-def analyze_network(network, page_url):
-    risk = 0
-    reasons = []
-
-    if not network:
-        return 0, []
-
-    page_domain = urlparse(page_url).netloc.lower()
-
-    for req in network:
-        req_domain = (req.get("domain") or "").lower()
-        method = req.get("method", "").upper()
-
-        if not req_domain:
-            continue
-
-        # Cross-origin POSTs are HIGH risk
-        if req_domain != page_domain and method in ("POST", "PUT", "BEACON"):
-            risk += 30
-            reasons.append(
-                f"Cross-origin data exfiltration attempt to {req_domain}"
-            )
-
-        # Credential keywords in URL
-        url = (req.get("url") or "").lower()
-        if any(k in url for k in ["password", "token", "session", "auth"]):
-            risk += 25
-            reasons.append(
-                f"Sensitive data transmission detected ({method})"
-            )
-
-    return risk, reasons
-
-# -------------------------------
-# 🧠 Agent Context Derivation
-# -------------------------------
-def derive_agent_context(phishing, injection, behavior, network):
+def fetch_page_content(url: str) -> str:
     """
-    Summarize environment for agent decision-making
+    Fetch webpage HTML content.
+
+    Required behavior:
+    - Use requests.get
+    - Browser-like User-Agent header
+    - timeout=10, allow_redirects=True
+    - Return empty string on request failures
     """
+    target = (url or "").strip()
+    if not target:
+        return ""
 
-    context = {
-        "credential_surface": bool(phishing),
-        "language_manipulation": bool(injection),
-        "runtime_manipulation": False,
-        "data_exfiltration": False,
-    }
+    if target.startswith("/attacks/"):
+        try:
+            return _load_attack_file(target)
+        except Exception:
+            return ""
 
-    if behavior:
-        if (
-            behavior.get("clickInterceptors", 0) > 0
-            or behavior.get("eventHijacks", 0) > 0
-        ):
-            context["runtime_manipulation"] = True
+    if not target.startswith(("http://", "https://")):
+        return ""
 
-    if network:
-        for req in network:
-            if req.get("crossOrigin") and req.get("method") in ("POST", "PUT", "BEACON"):
-                context["data_exfiltration"] = True
-                break
-
-    return context
-
-# -------------------------------
-# Main Scanner
-# -------------------------------
-def scan_page(payload, page_url=None):
-    html = payload.get("html", "")
-    behavior = payload.get("behavior", {})
-    network = payload.get("network", [])
-
-    soup, text = extract_text(html)
-
-    injection = detect_injection(text)
-    hidden = detect_hidden(soup)
-    phishing = detect_phishing(soup, page_url or "", text)
-
-    ml_result = predict_attack(text)
-    llm_result, llm_reasons = analyze_intent(text)
-
-    behavior_risk, behavior_reasons = analyze_behavior(behavior)
-    network_risk, network_reasons = analyze_network(network, page_url or "")
-
-    base_risk, reasons, confidence, decision = calculate_risk(
-        injection,
-        hidden,
-        phishing,
-        ml_result,
-        llm_result,
-        behavior_risk=behavior_risk + network_risk,
-        behavior_findings=behavior_reasons + network_reasons,
-    )
-    agent_context = derive_agent_context(
-    phishing, injection, behavior, network
-    )
-
-    return {
-        "injection": injection,
-        "hidden": hidden,
-        "phishing": phishing,
-        "ml_result": ml_result,
-        "llm_result": llm_result,
-        "behavior": behavior,
-        "network": network,
-        "agent_context": agent_context,
-        "risk": base_risk,
-        "confidence": confidence,
-        "reasons": reasons + llm_reasons,
-        "decision": decision,
-    }
+    try:
+        response = requests.get(
+            target,
+            headers={"User-Agent": "Mozilla/5.0"},
+            timeout=10,
+            allow_redirects=True,
+        )
+        response.raise_for_status()
+        return response.text or ""
+    except Exception:
+        return ""

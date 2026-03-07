@@ -1,20 +1,23 @@
-import { useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import { Link } from "react-router-dom";
+import { addDoc, collection, onSnapshot } from "firebase/firestore";
 import {
   ArrowLeft,
   AlertTriangle,
   Ban,
   CheckCircle,
-  Search,
-  Filter,
   ChevronDown,
   ChevronUp,
 } from "lucide-react";
 
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
-import { useScans } from "@/hooks/useScans";
+import RiskIntelligencePanel from "@/components/RiskIntelligencePanel";
+import ThreatTimeline from "@/components/ThreatTimeline";
+import ThreatAlert from "@/components/ThreatAlert";
+import { useToast } from "@/hooks/use-toast";
+import { db } from "@/lib/firebase";
 
 /* ---------------------------------- */
 /* UI CONFIG */
@@ -45,40 +48,276 @@ const statusConfig = {
 };
 
 type StatusFilter = "all" | "safe" | "warning" | "blocked";
+type Decision = "ALLOW" | "WARN" | "BLOCK";
+
+type DashboardPanelState = {
+  riskScore: number;
+  trustScore: number;
+  decision: Decision;
+  indicators: Array<{
+    name: string;
+    detected: boolean;
+    severity?: "low" | "medium" | "high" | "critical";
+  }>;
+  explanation: {
+    summary: string;
+    reasons: string[];
+  };
+};
+
+type Scan = {
+  id: string;
+  url: string;
+  timestamp?: any;
+  time?: string;
+  risk: number;
+  status?: "safe" | "warning" | "blocked";
+  decision?: Decision;
+  details?: any;
+  policy?: {
+    decision: "ALLOW" | "WARN" | "BLOCK";
+    reason: string;
+  };
+  agent_action?: {
+    type: string;
+    fields?: string[];
+    confidence?: string;
+    reason?: string;
+  };
+};
 
 /* ---------------------------------- */
 /* DASHBOARD */
 /* ---------------------------------- */
 
 const Dashboard = () => {
-  const { scans, loading } = useScans();
+  const { toast } = useToast();
 
+  const [scanInput, setScanInput] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [expandedScanId, setExpandedScanId] = useState<string | null>(null);
-
-  const filtered = scans.filter((scan) => {
-    const matchesSearch = scan.url
-      .toLowerCase()
-      .includes(searchQuery.toLowerCase());
-
-    const matchesStatus =
-      statusFilter === "all" || scan.status === statusFilter;
-
-    return matchesSearch && matchesStatus;
+  const [scanHistory, setScanHistory] = useState<Scan[]>([]);
+  const [latestThreat, setLatestThreat] = useState<Scan | null>(null);
+  const [panelState, setPanelState] = useState<DashboardPanelState>({
+    riskScore: 82,
+    trustScore: 45,
+    decision: "BLOCK",
+    indicators: [
+      { name: "prompt injection", detected: true, severity: "critical" },
+      { name: "hidden payload", detected: true, severity: "high" },
+      { name: "phishing", detected: false },
+      { name: "obfuscation", detected: false },
+    ],
+    explanation: {
+      summary:
+        "Page blocked due to prompt injection patterns and suspicious domain.",
+      reasons: [
+        "ML model detected high-confidence prompt injection patterns",
+        "Hidden DOM elements detected (often used for malicious purposes)",
+        "Domain uses suspicious top-level domain",
+      ],
+    },
   });
 
-  const total = scans.length;
-  const safeCount = scans.filter((s) => s.status === "safe").length;
-  const warnCount = scans.filter((s) => s.status === "warning").length;
-  const blockCount = scans.filter((s) => s.status === "blocked").length;
+  const formatTime = (ts: any) => {
+    if (ts?.toDate) return ts.toDate().toLocaleString();
+    if (ts instanceof Date) return ts.toLocaleString();
+    if (typeof ts === "string" || typeof ts === "number") {
+      const parsed = new Date(ts);
+      if (!Number.isNaN(parsed.getTime())) return parsed.toLocaleString();
+    }
+    return "--";
+  };
 
-  const avgScore = total
-    ? Math.round(scans.reduce((sum, s) => sum + s.risk, 0) / total)
-    : 0;
+  const severityFromIndicator = (indicator: string) => {
+    if (
+      indicator.includes("suspicious_tld") ||
+      indicator.includes("phishing") ||
+      indicator.includes("base64")
+    ) {
+      return "high" as const;
+    }
+    if (
+      indicator.includes("hex") ||
+      indicator.includes("unicode") ||
+      indicator.includes("hidden")
+    ) {
+      return "medium" as const;
+    }
+    return "low" as const;
+  };
 
-  const formatTime = (ts: any) =>
-    ts?.toDate ? ts.toDate().toLocaleString() : "--";
+  const normalizeDecision = (decision: unknown): Decision => {
+    const value = String(decision || "").toUpperCase();
+    if (value === "ALLOW" || value === "WARN" || value === "BLOCK") {
+      return value;
+    }
+    return "WARN";
+  };
+
+  const decisionToStatus = (decision: Decision): Scan["status"] => {
+    if (decision === "ALLOW") return "safe";
+    if (decision === "WARN") return "warning";
+    return "blocked";
+  };
+
+  const scanDecision = (scan: Scan): Decision => {
+    if (scan.decision === "ALLOW" || scan.decision === "WARN" || scan.decision === "BLOCK") {
+      return scan.decision;
+    }
+    if (
+      scan.policy?.decision === "ALLOW" ||
+      scan.policy?.decision === "WARN" ||
+      scan.policy?.decision === "BLOCK"
+    ) {
+      return scan.policy.decision;
+    }
+    if (scan.status === "safe") return "ALLOW";
+    if (scan.status === "blocked") return "BLOCK";
+    return "WARN";
+  };
+
+  const scanStatus = (scan: Scan): "safe" | "warning" | "blocked" => {
+    if (scan.status === "safe" || scan.status === "warning" || scan.status === "blocked") {
+      return scan.status;
+    }
+    const decision = scanDecision(scan);
+    if (decision === "ALLOW") return "safe";
+    if (decision === "BLOCK") return "blocked";
+    return "warning";
+  };
+
+  const scanTimeMs = (scan: Scan): number => {
+    const raw = scan.time ?? scan.timestamp;
+    if (!raw) return 0;
+    if (raw?.toDate) {
+      const t = raw.toDate().getTime();
+      return Number.isFinite(t) ? t : 0;
+    }
+    const t = new Date(String(raw)).getTime();
+    return Number.isFinite(t) ? t : 0;
+  };
+
+  const filtered = scanHistory
+    .filter((scan) => {
+      const matchesSearch = scan.url
+        .toLowerCase()
+        .includes(searchQuery.toLowerCase());
+      const matchesStatus =
+        statusFilter === "all" || scanStatus(scan) === statusFilter;
+      return matchesSearch && matchesStatus;
+    })
+    .sort((a, b) => scanTimeMs(b) - scanTimeMs(a));
+
+  const total = scanHistory.length;
+  const safeCount = scanHistory.filter((s) => scanStatus(s) === "safe").length;
+  const warnCount = scanHistory.filter((s) => scanStatus(s) === "warning").length;
+  const blockCount = scanHistory.filter((s) => scanStatus(s) === "blocked").length;
+
+  useEffect(() => {
+    const unsubscribe = onSnapshot(
+      collection(db, "scans"),
+      (snapshot) => {
+        const scans = snapshot.docs.map((doc) => ({
+          id: doc.id,
+          ...(doc.data() as Omit<Scan, "id">),
+        }));
+        const sorted = scans.sort((a, b) => {
+          const aTime = new Date(String(a.time || a.timestamp || 0)).getTime();
+          const bTime = new Date(String(b.time || b.timestamp || 0)).getTime();
+          return (Number.isFinite(bTime) ? bTime : 0) - (Number.isFinite(aTime) ? aTime : 0);
+        });
+
+        console.log("Loaded scans:", sorted);
+        setScanHistory(sorted);
+
+        const blocked = sorted.find((s) => s.decision === "BLOCK");
+        if (blocked) {
+          setLatestThreat(blocked);
+        } else {
+          setLatestThreat(null);
+        }
+      },
+      (error) => {
+        console.error("Firestore listener error:", error);
+      }
+    );
+
+    return () => unsubscribe();
+  }, []);
+
+  const updateRiskPanel = (data: any) => {
+    const decision = normalizeDecision(data?.decision);
+    const indicators = Array.isArray(data?.indicators) ? data.indicators : [];
+    const reasons = Array.isArray(data?.details?.reasons)
+      ? data.details.reasons
+      : indicators;
+
+    setPanelState({
+      riskScore: Number(data?.risk ?? 0),
+      trustScore: Number(data?.trust ?? 0),
+      decision,
+      indicators: indicators.map((name: string) => ({
+        name,
+        detected: true,
+        severity: severityFromIndicator(name),
+      })),
+      explanation: {
+        summary: String(data?.explanation || "No explanation available."),
+        reasons,
+      },
+    });
+  };
+
+  const scanUrl = async (url: string) => {
+    const target = url.trim();
+    if (!target) {
+      toast({
+        title: "Scan failed. Please try again.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    try {
+      const res = await fetch("http://localhost:8000/analyze_url", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ url: target }),
+      });
+      if (!res.ok) {
+        throw new Error(`Scan request failed (${res.status})`);
+      }
+      const data = await res.json();
+      updateRiskPanel(data);
+      const decision = normalizeDecision(data?.decision);
+      const indicators = Array.isArray(data?.indicators) ? data.indicators : [];
+      await addDoc(collection(db, "scans"), {
+        url: String(data?.url || target),
+        risk: Number(data?.risk ?? 0),
+        decision,
+        status: decisionToStatus(decision),
+        details: {
+          confidence: "live",
+          reasons: indicators,
+        },
+        policy: {
+          decision,
+          reason: "Decision from backend policy engine",
+        },
+        time: new Date().toISOString(),
+      });
+    } catch (err) {
+      console.error(err);
+      toast({
+        title: "Scan failed. Please try again.",
+        variant: "destructive",
+      });
+    }
+  };
 
   return (
     <div className="min-h-screen bg-background">
@@ -130,9 +369,49 @@ const Dashboard = () => {
             ))}
           </div>
 
+          {/* URL Scanner */}
+          <div className="mb-5 flex flex-col md:flex-row gap-3">
+            <input
+              value={scanInput}
+              onChange={(e) => setScanInput(e.target.value)}
+              placeholder="Enter URL to scan (e.g. https://example.com)"
+              className="flex-1 px-4 py-2 rounded-lg border border-border bg-background text-foreground"
+            />
+            <button
+              onClick={() => scanUrl(scanInput)}
+              className="bg-primary hover:bg-primary/90 text-primary-foreground px-4 py-2 rounded-lg"
+            >
+              Scan URL
+            </button>
+          </div>
+
+          <div className="mb-8">
+            {latestThreat && (
+              <ThreatAlert
+                key={`${latestThreat.id}-${latestThreat.time || latestThreat.timestamp || latestThreat.risk}`}
+                threat={latestThreat}
+              />
+            )}
+          </div>
+
+          <div className="mb-8">
+            <RiskIntelligencePanel
+              riskScore={panelState.riskScore}
+              trustScore={panelState.trustScore}
+              decision={panelState.decision}
+              indicators={panelState.indicators}
+              explanation={panelState.explanation}
+            />
+          </div>
+
+          {/* Threat timeline showing recent blocks/warns */}
+          <div className="mb-8">
+            <ThreatTimeline scans={scanHistory} />
+          </div>
+
           {/* Scan Table */}
-          <div className="glass rounded-xl overflow-hidden">
-            <table className="w-full text-sm">
+          <div className="glass rounded-xl overflow-hidden overflow-x-auto">
+            <table className="w-full text-sm table-fixed">
               <thead>
                 <tr className="border-b text-xs font-mono text-muted-foreground">
                   <th className="px-6 py-3 text-left">URL</th>
@@ -144,21 +423,29 @@ const Dashboard = () => {
               </thead>
               <tbody>
                 {filtered.map((scan) => {
-                  const Icon = statusIcons[scan.status];
-                  const cfg = statusConfig[scan.status];
+                  const status = scanStatus(scan);
+                  const Icon = statusIcons[status];
+                  const cfg = statusConfig[status];
                   const expanded = expandedScanId === scan.id;
 
                   return (
-                    <>
-                      <tr key={scan.id} className="border-b">
-                        <td className="px-6 py-3 font-mono text-xs truncate">
+                    <Fragment key={scan.id}>
+                      <tr className="border-b">
+                        <td
+                          title={scan.url}
+                          className="px-6 py-3 font-mono text-xs max-w-[400px] break-all [overflow-wrap:anywhere]"
+                        >
                           {scan.url}
                         </td>
                         <td className="px-4 py-3 text-xs font-mono">
-                          {formatTime(scan.timestamp)}
+                          {scan.timestamp
+                            ? formatTime(scan.timestamp)
+                            : scan.time
+                            ? formatTime(scan.time)
+                            : "Unknown"}
                         </td>
                         <td className="px-4 py-3 text-center">
-                          <span className="font-mono">{scan.risk}</span>
+                          <span className="font-mono">{scan.risk ?? 0}</span>
                         </td>
                         <td className="px-4 py-3 text-center">
                           <span
@@ -230,7 +517,7 @@ const Dashboard = () => {
                           </td>
                         </tr>
                       )}
-                    </>
+                    </Fragment>
                   );
                 })}
               </tbody>

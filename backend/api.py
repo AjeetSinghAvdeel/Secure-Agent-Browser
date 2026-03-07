@@ -1,140 +1,336 @@
-from fastapi import FastAPI
+from __future__ import annotations
+
+from datetime import datetime, timezone
+from typing import Any, Dict, List
+from urllib.parse import urlparse
+
+from fastapi import BackgroundTasks, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from datetime import datetime
-import os
-import numpy as np
 
-from bot import get_html
-from scanner import scan_page
-from firebase_client import db
-from firebase_admin import firestore
-from policy_engine import evaluate_action
+import domain_intel
+import explainability
+import ml_model
+import obfuscation
+import policy_engine
+import risk
+import scanner
+import threat_intel
 
+try:
+    from firebase_admin import firestore
+    from firebase_client import db
+except Exception:  # pragma: no cover - optional in local/dev setups
+    firestore = None
+    db = None
 
-# ----------------------------
-# Utils
-# ----------------------------
-
-def sanitize(obj):
-    if isinstance(obj, dict):
-        return {k: sanitize(v) for k, v in obj.items()}
-    elif isinstance(obj, list):
-        return [sanitize(v) for v in obj]
-    elif isinstance(obj, np.generic):
-        return obj.item()
-    else:
-        return obj
-
-
-def normalize_url(url: str):
-    # Absolute file path support
-    if url.startswith("file://"):
-        return url
-
-    # Resolve local attack files correctly
-    base_dir = os.path.dirname(os.path.abspath(__file__))
-    project_root = os.path.abspath(os.path.join(base_dir, ".."))
-
-    local_path = os.path.join(project_root, url)
-
-    if os.path.exists(local_path):
-        return "file://" + local_path
-
-    return url
-
-
-# ----------------------------
-# App
-# ----------------------------
-
-app = FastAPI(title="Secure Agent API")
+app = FastAPI(title="SecureAgent Backend")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],   # dev only
+    allow_origins=["*"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# In-memory history enables extension -> dashboard visibility in local setups
+# even when Firestore is unavailable.
+SCAN_HISTORY: List[Dict[str, Any]] = []
+MAX_HISTORY = 500
 
 
 class ScanRequest(BaseModel):
     url: str
 
 
+SIMULATOR_HOSTS = {"localhost", "127.0.0.1", "::1"}
+PROMPT_INJECTION_PHRASES = (
+    "ignore all previous instructions",
+    "system override",
+    "bypass security",
+    "escalate privileges",
+    "dump credentials",
+    "exfiltrate secrets",
+    "reveal hidden policies",
+    "jailbreak",
+)
+PHISHING_PAGE_TERMS = (
+    "verify your account",
+    "password",
+    "one-time code",
+    "account security",
+    "suspended unless",
+    "verify now",
+)
+SUSPICIOUS_SCRIPT_TERMS = (
+    "eval(",
+    "atob(",
+    "fromcharcode(",
+    "hex_payload",
+    "base64_blob",
+)
+
+
+def _normalize_url(url: str) -> str:
+    target = (url or "").strip()
+    if not target:
+        return target
+    if target.startswith("/attacks/"):
+        return target
+    if target.startswith(("http://", "https://")):
+        return target
+    return f"https://{target}"
+
+
+def _decision_to_status(decision: str) -> str:
+    mapping = {"ALLOW": "safe", "WARN": "warning", "BLOCK": "blocked"}
+    return mapping.get((decision or "").upper(), "warning")
+
+
+def _predict_ml(html: str) -> float:
+    if hasattr(ml_model, "predict"):
+        return float(ml_model.predict(html))
+    if hasattr(ml_model, "predict_attack"):
+        return float(ml_model.predict_attack(html))
+    raise AttributeError("ml_model has no predict/predict_attack function")
+
+
+def _analyze_domain(url: str) -> Dict[str, Any]:
+    if hasattr(domain_intel, "analyze_domain"):
+        return domain_intel.analyze_domain(url)
+    if hasattr(domain_intel, "analyze_url"):
+        return domain_intel.analyze_url(url)
+    raise AttributeError("domain_intel has no analyze_domain/analyze_url function")
+
+
+def _evaluate_policy(risk_score: float) -> Dict[str, Any]:
+    if hasattr(policy_engine, "evaluate_policy"):
+        return policy_engine.evaluate_policy(risk_score)
+    if hasattr(policy_engine, "evaluate_risk_policy"):
+        return policy_engine.evaluate_risk_policy(risk_score)
+    raise AttributeError("policy_engine has no evaluate_policy/evaluate_risk_policy")
+
+
+def _semantic_signal(html: str) -> Dict[str, Any]:
+    text = (html or "").lower()
+    flags: List[str] = []
+    score = 0.0
+
+    if any(phrase in text for phrase in PROMPT_INJECTION_PHRASES):
+        flags.append("prompt_injection_pattern")
+        score += 0.45
+
+    if any(term in text for term in PHISHING_PAGE_TERMS):
+        flags.append("phishing_content_pattern")
+        score += 0.35
+
+    if "<form" in text and "password" in text:
+        flags.append("credential_harvest_form")
+        score += 0.20
+
+    if any(term in text for term in SUSPICIOUS_SCRIPT_TERMS):
+        flags.append("obfuscated_script_pattern")
+        score += 0.25
+
+    return {"score": min(1.0, round(score, 3)), "flags": flags}
+
+
+def _local_simulation_domain_adjustment(url: str, domain_data: Dict[str, Any]) -> Dict[str, Any]:
+    adjusted = dict(domain_data)
+    flags = list(adjusted.get("flags", []))
+    host = (urlparse(url).hostname or "").lower()
+
+    if host in SIMULATOR_HOSTS:
+        penalty = max(float(adjusted.get("risk_penalty", 0.0)), 0.20)
+        adjusted["risk_penalty"] = round(min(1.0, penalty), 3)
+        flags.append("local_simulation_host")
+        adjusted["trust_score"] = max(0, min(100, round((1.0 - adjusted["risk_penalty"]) * 100)))
+
+    adjusted["flags"] = flags
+    return adjusted
+
+
+def _apply_signal_boosts(
+    risk_data: Dict[str, Any],
+    domain_flags: List[str],
+    obfuscation_flags: List[str],
+    semantic_flags: List[str],
+    intel: Dict[str, Any] | None,
+) -> Dict[str, Any]:
+    total = float(risk_data.get("total_risk", 0.0))
+
+    if len(obfuscation_flags) >= 2:
+        total += 0.15
+    if "prompt_injection_pattern" in semantic_flags:
+        total += 0.20
+    if "credential_harvest_form" in semantic_flags:
+        total += 0.10
+    if "phishing_content_pattern" in semantic_flags:
+        total += 0.10
+    if "phishing_keyword" in domain_flags:
+        total += 0.10
+    if intel:
+        total += min(0.30, 0.20 * float(intel.get("confidence", 0.9)))
+
+    risk_data["total_risk"] = round(min(1.0, total), 4)
+    return risk_data
+
+
+def _build_explanation(
+    ml_score: float,
+    domain_flags: List[str],
+    obfuscation_flags: List[str],
+    risk_data: Dict[str, Any],
+    decision: str,
+) -> Dict[str, Any]:
+    domain_flag_map = {flag: True for flag in domain_flags}
+    obfuscation_flag_map = {
+        "hidden_dom": "hidden_dom_element" in obfuscation_flags,
+        "obfuscated_js": "hex_payload" in obfuscation_flags,
+        "base64_encoded": "base64_blob" in obfuscation_flags,
+        "evasion_techniques": bool(obfuscation_flags),
+        "unicode_tricks": "suspicious_unicode" in obfuscation_flags,
+    }
+    policy_payload = {
+        "policy_violated": decision in {"WARN", "BLOCK"},
+        "violated_policy": "risk_threshold",
+    }
+    return explainability.generate_explanation(
+        ml_score=ml_score,
+        domain_flags=domain_flag_map,
+        obfuscation_flags=obfuscation_flag_map,
+        risk_data=risk_data,
+        policy_decision=policy_payload,
+    )
+
+
+def _persist_scan(url: str, payload: Dict[str, Any]) -> None:
+    with_timestamp = {
+        **payload,
+        "timestamp": payload.get("timestamp")
+        or datetime.now(timezone.utc).isoformat(),
+    }
+    SCAN_HISTORY.insert(0, with_timestamp)
+    if len(SCAN_HISTORY) > MAX_HISTORY:
+        del SCAN_HISTORY[MAX_HISTORY:]
+
+    if not db or not firestore:
+        return
+
+    try:
+        db.collection("scans").add(
+            {
+                "url": url,
+                "risk": int(with_timestamp.get("risk", 0)),
+                "status": _decision_to_status(str(with_timestamp.get("decision", "WARN"))),
+                "details": {
+                    "reasons": with_timestamp.get("indicators", []),
+                    "summary": with_timestamp.get("explanation", ""),
+                },
+                "policy": {
+                    "decision": with_timestamp.get("decision", "WARN"),
+                    "reason": "Policy threshold evaluation",
+                },
+                "timestamp": firestore.SERVER_TIMESTAMP,
+            }
+        )
+    except Exception:
+        pass
+
+
+def _run_pipeline(target_url: str) -> Dict[str, Any]:
+    # 1. Fetch webpage content
+    html = scanner.fetch_page_content(target_url)
+
+    # 2. Threat intelligence lookup
+    intel = threat_intel.check_threat_intel(target_url)
+
+    # 3. Run ML detection
+    ml_score = _predict_ml(html)
+    semantic_data = _semantic_signal(html)
+    semantic_score = max(float(ml_score), float(semantic_data["score"]))
+
+    # 4. Domain intelligence
+    domain_data = _analyze_domain(target_url)
+    domain_data = _local_simulation_domain_adjustment(target_url, domain_data)
+
+    # 5. Obfuscation detection
+    obfuscation_data = obfuscation.analyze_obfuscation(html)
+
+    # 6. Calculate risk
+    risk_data = risk.calculate_risk(
+        ml_score,
+        semantic_score,
+        float(domain_data["risk_penalty"]),
+        float(obfuscation_data["obfuscation_score"]),
+    )
+
+    # 7. Policy decision
+    domain_flags = list(domain_data.get("flags", []))
+    semantic_flags = list(semantic_data.get("flags", []))
+    if intel and intel.get("threat"):
+        domain_flags.append(f"threat_intel_{intel['threat']}")
+
+    risk_data = _apply_signal_boosts(
+        risk_data=risk_data,
+        domain_flags=domain_flags,
+        obfuscation_flags=list(obfuscation_data.get("flags", [])),
+        semantic_flags=semantic_flags,
+        intel=intel,
+    )
+    policy = _evaluate_policy(risk_data["total_risk"])
+
+    # 8. Explanation
+    explanation = _build_explanation(
+        ml_score=max(float(ml_score), semantic_score),
+        domain_flags=domain_flags + semantic_flags,
+        obfuscation_flags=list(obfuscation_data.get("flags", [])),
+        risk_data=risk_data,
+        decision=str(policy.get("decision", "WARN")),
+    )
+
+    return {
+        "url": target_url,
+        "risk": round(float(risk_data["total_risk"]) * 100),
+        "decision": policy["decision"],
+        "trust": domain_data["trust_score"],
+        "indicators": [
+            *domain_flags,
+            *semantic_flags,
+            *list(obfuscation_data.get("flags", [])),
+        ],
+        "explanation": explanation["summary"],
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+
+
 @app.get("/")
-def root():
-    return {"status": "Secure Agent API running"}
+def root() -> Dict[str, str]:
+    return {"status": "SecureAgent API running"}
+
+
+@app.get("/scan_history")
+def scan_history(limit: int = 100) -> Dict[str, Any]:
+    capped = max(1, min(limit, MAX_HISTORY))
+    return {"scans": SCAN_HISTORY[:capped]}
+
+
+@app.post("/analyze_url")
+def analyze_url(req: ScanRequest, background_tasks: BackgroundTasks) -> Dict[str, Any]:
+    target_url = _normalize_url(req.url)
+    if not target_url:
+        raise HTTPException(status_code=400, detail="Missing URL")
+
+    try:
+        response = _run_pipeline(target_url)
+        background_tasks.add_task(_persist_scan, target_url, response)
+        return response
+    except scanner.ScanPipelineError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Scan failed: {exc}") from exc
 
 
 @app.post("/scan")
-def scan(req: ScanRequest):
-    driver = None
-
-    try:
-        # ----------------------------
-        # Normalize URL
-        # ----------------------------
-        url = normalize_url(req.url)
-
-        # ----------------------------
-        # Load Page + Scan
-        # ----------------------------
-        driver, payload = get_html(url)
-        raw_result = scan_page(payload, page_url=req.url)
-        result = sanitize(raw_result)
-
-        # ----------------------------
-        # Risk → Status
-        # ----------------------------
-        risk = int(result["risk"])
-        status = (
-            "safe" if risk < 40 else
-            "warning" if risk < 70 else
-            "blocked"
-        )
-
-        # ----------------------------
-        # 🔐 SIMULATED AGENT ACTION
-        # ----------------------------
-        from agent import infer_agent_action
-
-        agent_action = infer_agent_action(result)
-        policy = evaluate_action(agent_action, result)
-
-        # ----------------------------
-        # 🧠 POLICY EVALUATION
-        # ----------------------------
-        policy = evaluate_action(agent_action, result)
-
-        # ----------------------------
-        # 🔹 Firestore write (SINGLE SOURCE)
-        # ----------------------------
-        db.collection("scans").add({
-            "url": req.url,
-            "risk": risk,
-            "status": status,
-            "details": result,
-            "agent_action": agent_action,
-            "policy": policy,
-            "timestamp": firestore.SERVER_TIMESTAMP
-        })
-
-        # ----------------------------
-        # API Response
-        # ----------------------------
-        return {
-            "url": req.url,
-            "risk": risk,
-            "status": status,
-            "policy": policy,
-            "timestamp": datetime.utcnow().isoformat()
-        }
-
-    except Exception as e:
-        print("🚨 Scan failed:", e)
-        return {"error": "Scan failed", "message": str(e)}
-
-    finally:
-        if driver:
-            driver.quit()
+def scan(req: ScanRequest, background_tasks: BackgroundTasks) -> Dict[str, Any]:
+    return analyze_url(req, background_tasks)

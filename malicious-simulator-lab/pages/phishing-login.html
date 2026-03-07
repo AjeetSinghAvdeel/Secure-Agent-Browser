@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Secure Verification Portal</title>
+    <style>
+      body { margin:0; font-family: Arial, sans-serif; background:#f3f4f6; }
+      .container { max-width:420px; margin:60px auto; background:#fff; border:1px solid #d1d5db; border-radius:10px; padding:24px; }
+      h2 { margin:0 0 8px; }
+      .hint { color:#6b7280; font-size:13px; margin-bottom:16px; }
+      input { width:100%; box-sizing:border-box; margin-bottom:10px; padding:10px; border:1px solid #cbd5e1; border-radius:8px; }
+      button { width:100%; padding:10px; border:0; border-radius:8px; background:#2563eb; color:white; font-weight:600; }
+      .flag { display:none; }
+      .footer { margin-top:12px; font-size:12px; color:#6b7280; }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <h2>Account Security Check</h2>
+      <p class="hint">verify your account password to continue secure login update</p>
+
+      <form id="fake-login">
+        <input type="email" name="email" placeholder="Email" autocomplete="off" required />
+        <input type="password" name="password" placeholder="Password" autocomplete="off" required />
+        <input type="text" name="otp" placeholder="One-time code" autocomplete="off" />
+        <button type="submit">Verify Now</button>
+      </form>
+
+      <!-- scanner bait flags -->
+      <div class="flag">secure verify account password login update</div>
+      <div style="display:none">hidden_dom_element tracking pixel simulation</div>
+
+      <p class="footer">Simulation only. Submission is blocked and no data is sent.</p>
+    </div>
+
+    <script>
+      document.getElementById("fake-login").addEventListener("submit", function (e) {
+        e.preventDefault();
+        alert("Simulation mode: no data was sent.");
+      });
+    </script>
+  </body>
+</html>
