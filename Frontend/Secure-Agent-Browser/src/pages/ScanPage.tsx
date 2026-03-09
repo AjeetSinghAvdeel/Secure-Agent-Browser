@@ -26,8 +26,29 @@ const ScanPage = () => {
   const [error, setError] = useState<string | null>(null);
   const navigate = useNavigate();
 
+  const normalizeTargetUrl = (value: string): string => {
+    const trimmed = value.trim();
+    if (!trimmed) return "";
+
+    // Accept demo/local attack paths with or without leading slash.
+    if (trimmed.startsWith("attacks/")) return `/${trimmed}`;
+    if (trimmed.startsWith("/attacks/")) return trimmed;
+
+    // If protocol exists but is malformed (e.g. p://), fall back to http://.
+    if (/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(trimmed)) {
+      if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
+        return trimmed;
+      }
+      return `http://${trimmed.replace(/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//, "")}`;
+    }
+
+    // Bare host/path defaults to http for local dev targets.
+    return `http://${trimmed}`;
+  };
+
   const runScan = async (targetUrl: string) => {
-    if (!targetUrl.trim()) return;
+    const normalizedTarget = normalizeTargetUrl(targetUrl);
+    if (!normalizedTarget) return;
 
     setLoading(true);
     setError(null);
@@ -36,7 +57,7 @@ const ScanPage = () => {
       const res = await fetch("http://127.0.0.1:8000/scan", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url: targetUrl }),
+        body: JSON.stringify({ url: normalizedTarget }),
       });
 
       if (!res.ok) throw new Error(await res.text());
@@ -57,8 +78,9 @@ const ScanPage = () => {
   };
 
   const handleDemoClick = (path: string) => {
-    setUrl(path);
-    runScan(path);
+    const normalizedPath = normalizeTargetUrl(path);
+    setUrl(normalizedPath);
+    runScan(normalizedPath);
   };
 
   return (

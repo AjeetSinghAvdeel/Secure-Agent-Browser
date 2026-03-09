@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import { Link } from "react-router-dom";
-import { addDoc, collection, onSnapshot } from "firebase/firestore";
+import { collection, onSnapshot } from "firebase/firestore";
 import {
   ArrowLeft,
   AlertTriangle,
@@ -16,7 +16,6 @@ import Footer from "@/components/Footer";
 import RiskIntelligencePanel from "@/components/RiskIntelligencePanel";
 import ThreatTimeline from "@/components/ThreatTimeline";
 import ThreatAlert from "@/components/ThreatAlert";
-import { useToast } from "@/hooks/use-toast";
 import { db } from "@/lib/firebase";
 
 /* ---------------------------------- */
@@ -124,9 +123,6 @@ const calculateDomainTrustFallback = (url: string): number => {
 /* ---------------------------------- */
 
 const Dashboard = () => {
-  const { toast } = useToast();
-
-  const [scanInput, setScanInput] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [expandedScan, setExpandedScan] = useState<string | null>(null);
@@ -159,20 +155,6 @@ const Dashboard = () => {
       return "medium" as const;
     }
     return "low" as const;
-  };
-
-  const normalizeDecision = (decision: unknown): Decision => {
-    const value = String(decision || "").toUpperCase();
-    if (value === "ALLOW" || value === "WARN" || value === "BLOCK") {
-      return value;
-    }
-    return "WARN";
-  };
-
-  const decisionToStatus = (decision: Decision): Scan["status"] => {
-    if (decision === "ALLOW") return "safe";
-    if (decision === "WARN") return "warning";
-    return "blocked";
   };
 
   const scanDecision = (scan: Scan): Decision => {
@@ -273,56 +255,6 @@ const Dashboard = () => {
     return () => unsubscribe();
   }, []);
 
-  const scanUrl = async (url: string) => {
-    const target = url.trim();
-    if (!target) {
-      toast({
-        title: "Scan failed. Please try again.",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    try {
-      const res = await fetch("http://localhost:8000/analyze_url", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ url: target }),
-      });
-      if (!res.ok) {
-        throw new Error(`Scan request failed (${res.status})`);
-      }
-      const data = await res.json();
-      const decision = normalizeDecision(data?.decision);
-      const indicators = Array.isArray(data?.indicators) ? data.indicators : [];
-      await addDoc(collection(db, "scans"), {
-        url: String(data?.url || target),
-        risk: Number(data?.risk ?? 0),
-        trust: Number(data?.trust ?? 0),
-        analysisSummary: String(data?.explanation || "No explanation available."),
-        decision,
-        status: decisionToStatus(decision),
-        details: {
-          confidence: "live",
-          reasons: indicators,
-        },
-        policy: {
-          decision,
-          reason: "Decision from backend policy engine",
-        },
-        time: new Date().toISOString(),
-      });
-    } catch (err) {
-      console.error(err);
-      toast({
-        title: "Scan failed. Please try again.",
-        variant: "destructive",
-      });
-    }
-  };
-
   return (
     <div className="min-h-screen bg-background">
       <Navbar />
@@ -375,22 +307,6 @@ const Dashboard = () => {
                 <p className="text-3xl font-bold font-mono">{stat.value}</p>
               </motion.button>
             ))}
-          </div>
-
-          {/* URL Scanner */}
-          <div className="mb-5 flex flex-col md:flex-row gap-3">
-            <input
-              value={scanInput}
-              onChange={(e) => setScanInput(e.target.value)}
-              placeholder="Enter URL to scan (e.g. https://example.com)"
-              className="flex-1 px-4 py-2 rounded-lg border border-border bg-background text-foreground"
-            />
-            <button
-              onClick={() => scanUrl(scanInput)}
-              className="bg-primary hover:bg-primary/90 text-primary-foreground px-4 py-2 rounded-lg"
-            >
-              Scan URL
-            </button>
           </div>
 
           <div className="mb-8">

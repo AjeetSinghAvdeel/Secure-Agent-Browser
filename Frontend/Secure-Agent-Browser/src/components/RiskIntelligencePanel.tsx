@@ -36,55 +36,78 @@ const RiskIntelligencePanel: React.FC<RiskIntelligencePanelProps> = ({
   indicators,
   explanation
 }) => {
-  // Determine trust score color
-  const getTrustColor = (score: number): { bar: string; text: string; bg: string } => {
-    if (score > 80) return { bar: 'bg-green-500', text: 'text-green-700', bg: 'bg-green-50' };
-    if (score >= 40) return { bar: 'bg-yellow-500', text: 'text-yellow-700', bg: 'bg-yellow-50' };
-    return { bar: 'bg-red-500', text: 'text-red-700', bg: 'bg-red-50' };
+  const getTrustColor = (
+    score: number
+  ): { bar: string; text: string; bg: string; ring: string } => {
+    if (score > 80) {
+      return {
+        bar: 'bg-cyber-safe',
+        text: 'text-cyber-safe',
+        bg: 'bg-cyber-safe/10',
+        ring: 'border-cyber-safe/30',
+      };
+    }
+    if (score >= 40) {
+      return {
+        bar: 'bg-cyber-warning',
+        text: 'text-cyber-warning',
+        bg: 'bg-cyber-warning/10',
+        ring: 'border-cyber-warning/30',
+      };
+    }
+    return {
+      bar: 'bg-cyber-danger',
+      text: 'text-cyber-danger',
+      bg: 'bg-cyber-danger/10',
+      ring: 'border-cyber-danger/30',
+    };
   };
 
-  // Determine trust label
   const getTrustLabel = (score: number): string => {
     if (score > 80) return 'High Trust';
     if (score >= 40) return 'Medium Trust';
     return 'Low Trust';
   };
 
-  // Determine decision styling
   const getDecisionStyle = (
     dec: string
   ): {
     color: string;
     bgColor: string;
+    ring: string;
     icon: React.ReactNode;
     description: string;
   } => {
     switch (dec) {
       case 'ALLOW':
         return {
-          color: 'text-green-600',
-          bgColor: 'bg-green-100',
+          color: 'text-cyber-safe',
+          bgColor: 'bg-cyber-safe/15',
+          ring: 'border-cyber-safe/30',
           icon: <CheckCircle className="w-6 h-6" />,
           description: 'Safe to proceed'
         };
       case 'WARN':
         return {
-          color: 'text-yellow-600',
-          bgColor: 'bg-yellow-100',
+          color: 'text-cyber-warning',
+          bgColor: 'bg-cyber-warning/15',
+          ring: 'border-cyber-warning/30',
           icon: <AlertTriangle className="w-6 h-6" />,
           description: 'Proceed with caution'
         };
       case 'BLOCK':
         return {
-          color: 'text-red-600',
-          bgColor: 'bg-red-100',
+          color: 'text-cyber-danger',
+          bgColor: 'bg-cyber-danger/15',
+          ring: 'border-cyber-danger/30',
           icon: <AlertCircle className="w-6 h-6" />,
           description: 'Access blocked'
         };
       default:
         return {
-          color: 'text-gray-600',
-          bgColor: 'bg-gray-100',
+          color: 'text-muted-foreground',
+          bgColor: 'bg-secondary/60',
+          ring: 'border-border',
           icon: <Shield className="w-6 h-6" />,
           description: 'Unknown status'
         };
@@ -95,23 +118,22 @@ const RiskIntelligencePanel: React.FC<RiskIntelligencePanelProps> = ({
   const trustColors = getTrustColor(trustScore);
   const detectedIndicators = indicators.filter(ind => ind.detected);
 
-  // Severity color mapping
   const severityColors: { [key: string]: string } = {
-    critical: 'bg-red-100 text-red-800 border-red-300',
-    high: 'bg-orange-100 text-orange-800 border-orange-300',
-    medium: 'bg-yellow-100 text-yellow-800 border-yellow-300',
-    low: 'bg-blue-100 text-blue-800 border-blue-300'
+    critical: 'bg-cyber-danger/20 text-red-200 border-cyber-danger/40',
+    high: 'bg-orange-500/15 text-orange-200 border-orange-400/40',
+    medium: 'bg-cyber-warning/15 text-yellow-100 border-cyber-warning/40',
+    low: 'bg-primary/15 text-cyan-100 border-primary/40'
   };
 
   return (
-    <Card className="w-full border-2 shadow-lg">
+    <Card className="w-full overflow-hidden border border-cyber-glass-border/80 bg-gradient-to-b from-cyber-glass/70 to-background/70 shadow-xl backdrop-blur-sm">
       {/* Header */}
-      <div className="bg-gradient-to-r from-blue-600 to-blue-700 text-white p-4 md:p-6 flex items-center justify-between rounded-t-lg">
+      <div className="bg-gradient-to-r from-primary/30 via-primary/20 to-accent/20 border-b border-cyber-glass-border p-4 md:p-5 flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <Shield className="w-6 h-6" />
-          <h2 className="text-xl md:text-2xl font-bold">Risk Intelligence Panel</h2>
+          <Shield className="w-5 h-5 text-primary" />
+          <h2 className="text-lg md:text-xl font-semibold text-foreground">Risk Intelligence Panel</h2>
         </div>
-        <TrendingUp className="w-6 h-6 opacity-70" />
+        <TrendingUp className="w-5 h-5 text-primary/80" />
       </div>
 
       {/* Content */}
@@ -119,8 +141,8 @@ const RiskIntelligencePanel: React.FC<RiskIntelligencePanelProps> = ({
         {/* Top Row: Risk Gauge + Trust Score + Decision */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-6">
           {/* Risk Score Gauge */}
-          <div className="flex flex-col items-center justify-center p-4 bg-gray-50 rounded-lg border-2 border-gray-200">
-            <h3 className="text-xs font-semibold text-gray-600 uppercase tracking-wider mb-3">
+          <div className="flex flex-col items-center justify-center p-4 bg-secondary/40 rounded-xl border border-border">
+            <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">
               Risk Score
             </h3>
             <div className="w-full flex justify-center">
@@ -138,14 +160,14 @@ const RiskIntelligencePanel: React.FC<RiskIntelligencePanelProps> = ({
               />
             </div>
             <div className="text-center mt-2">
-              <p className="text-2xl font-bold text-gray-900">{riskScore}</p>
-              <p className="text-xs text-gray-600">out of 100</p>
+              <p className="text-3xl font-bold text-foreground">{riskScore}</p>
+              <p className="text-xs text-muted-foreground">out of 100</p>
             </div>
           </div>
 
           {/* Trust Score */}
-          <div className="flex flex-col justify-center p-4 bg-gray-50 rounded-lg border-2 border-gray-200">
-            <h3 className="text-xs font-semibold text-gray-600 uppercase tracking-wider mb-3">
+          <div className="flex flex-col justify-center p-4 bg-secondary/40 rounded-xl border border-border">
+            <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">
               Domain Trust
             </h3>
             <div className="flex-grow flex flex-col justify-center">
@@ -154,9 +176,9 @@ const RiskIntelligencePanel: React.FC<RiskIntelligencePanelProps> = ({
                   <span className={`text-sm font-bold ${trustColors.text}`}>
                     {getTrustLabel(trustScore)}
                   </span>
-                  <span className="text-lg font-bold text-gray-900">{trustScore}%</span>
+                  <span className="text-2xl font-semibold text-foreground">{trustScore}%</span>
                 </div>
-                <div className="w-full bg-gray-300 rounded-full h-3 overflow-hidden">
+                <div className="w-full bg-muted rounded-full h-2.5 overflow-hidden">
                   <div
                     className={`${trustColors.bar} h-3 rounded-full transition-all duration-500`}
                     style={{ width: `${trustScore}%` }}
@@ -165,8 +187,8 @@ const RiskIntelligencePanel: React.FC<RiskIntelligencePanelProps> = ({
               </div>
 
               {/* Trust Status Indicator */}
-              <div className={`${trustColors.bg} p-3 rounded border-l-4 ${trustColors.bar}`}>
-                <p className={`text-xs font-medium ${trustColors.text}`}>
+              <div className={`${trustColors.bg} ${trustColors.ring} p-3 rounded-lg border`}>
+                <p className={`text-xs font-medium leading-relaxed ${trustColors.text}`}>
                   {trustScore > 80
                     ? 'Domain appears legitimate and trustworthy'
                     : trustScore >= 40
@@ -178,25 +200,25 @@ const RiskIntelligencePanel: React.FC<RiskIntelligencePanelProps> = ({
           </div>
 
           {/* Security Decision Badge */}
-          <div className="flex flex-col items-center justify-center p-4 bg-gray-50 rounded-lg border-2 border-gray-200">
-            <h3 className="text-xs font-semibold text-gray-600 uppercase tracking-wider mb-3 w-full text-center">
+          <div className={`flex flex-col items-center justify-center p-4 rounded-xl border bg-secondary/40 ${decisionStyle.ring}`}>
+            <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3 w-full text-center">
               Security Decision
             </h3>
-            <div className={`p-4 rounded-full ${decisionStyle.bgColor} mb-3`}>
+            <div className={`p-4 rounded-full ${decisionStyle.bgColor} border ${decisionStyle.ring} mb-3`}>
               <div className={`${decisionStyle.color}`}>{decisionStyle.icon}</div>
             </div>
             <p className={`text-2xl font-bold ${decisionStyle.color}`}>{decision}</p>
-            <p className="text-xs text-gray-600 text-center mt-2">{decisionStyle.description}</p>
+            <p className="text-xs text-muted-foreground text-center mt-2">{decisionStyle.description}</p>
           </div>
         </div>
 
         {/* Attack Indicators Section */}
         <div className="space-y-3">
-          <h3 className="text-sm font-semibold text-gray-900 flex items-center gap-2">
-            <AlertTriangle className="w-4 h-4 text-orange-600" />
+          <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4 text-cyber-warning" />
             Detected Signals
             {detectedIndicators.length > 0 && (
-              <Badge className="ml-2 bg-red-100 text-red-800 border-red-300">
+              <Badge className="ml-2 bg-cyber-danger/20 text-red-200 border-cyber-danger/40">
                 {detectedIndicators.length} detected
               </Badge>
             )}
@@ -224,40 +246,40 @@ const RiskIntelligencePanel: React.FC<RiskIntelligencePanelProps> = ({
               ))}
             </div>
           ) : (
-            <div className="p-4 bg-green-50 rounded-lg border-2 border-green-200 flex items-center gap-3">
-              <CheckCircle className="w-5 h-5 text-green-600 flex-shrink-0" />
-              <p className="text-green-800 font-medium text-sm">No attack signals detected</p>
+            <div className="p-4 bg-cyber-safe/10 rounded-lg border border-cyber-safe/30 flex items-center gap-3">
+              <CheckCircle className="w-5 h-5 text-cyber-safe flex-shrink-0" />
+              <p className="text-cyber-safe font-medium text-sm">No attack signals detected</p>
             </div>
           )}
         </div>
 
         {/* Explanation Summary */}
-        <div className="space-y-3 bg-blue-50 border-2 border-blue-200 p-4 rounded-lg">
+        <div className="space-y-3 bg-primary/10 border border-primary/30 p-4 rounded-lg">
           <div className="flex items-start gap-3">
-            <div className="w-6 h-6 rounded-full bg-blue-600 text-white flex items-center justify-center flex-shrink-0 mt-0.5 text-xs font-bold">
+            <div className="w-6 h-6 rounded-full bg-primary text-primary-foreground flex items-center justify-center flex-shrink-0 mt-0.5 text-xs font-bold">
               i
             </div>
             <div className="flex-1">
-              <h4 className="text-xs font-semibold text-blue-900 uppercase tracking-wider mb-2">
+              <h4 className="text-xs font-semibold text-primary uppercase tracking-wider mb-2">
                 AI Analysis
               </h4>
-              <p className="text-sm text-blue-900 leading-relaxed font-medium">
+              <p className="text-sm text-foreground leading-relaxed font-medium">
                 {explanation.summary}
               </p>
 
               {/* Detailed Reasons */}
               {explanation.reasons && explanation.reasons.length > 0 && (
                 <div className="mt-3 space-y-2">
-                  <p className="text-xs font-semibold text-blue-800 uppercase">Key Findings:</p>
-                  <ul className="space-y-1 text-xs text-blue-800">
+                  <p className="text-xs font-semibold text-primary uppercase">Key Findings:</p>
+                  <ul className="space-y-1 text-xs text-foreground">
                     {explanation.reasons.slice(0, 3).map((reason, index) => (
                       <li key={index} className="flex gap-2 ml-2">
-                        <span className="font-bold flex-shrink-0">•</span>
+                        <span className="font-bold flex-shrink-0 text-primary">•</span>
                         <span>{reason}</span>
                       </li>
                     ))}
                     {explanation.reasons.length > 3 && (
-                      <li className="text-blue-700 font-semibold ml-2">
+                      <li className="text-primary font-semibold ml-2">
                         + {explanation.reasons.length - 3} more findings
                       </li>
                     )}
@@ -269,23 +291,23 @@ const RiskIntelligencePanel: React.FC<RiskIntelligencePanelProps> = ({
         </div>
 
         {/* Quick Stats Footer */}
-        <div className="grid grid-cols-3 gap-3 pt-3 border-t-2 border-gray-200">
-          <div className="text-center p-2 bg-gray-50 rounded">
-            <p className="text-xs font-semibold text-gray-600 uppercase">Risk Level</p>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-3 border-t border-border">
+          <div className="text-center p-3 bg-secondary/40 rounded-lg border border-border">
+            <p className="text-xs font-semibold text-muted-foreground uppercase">Risk Level</p>
             <p className={`text-lg font-bold mt-1 ${
-              riskScore >= 70 ? 'text-red-600' :
-              riskScore >= 40 ? 'text-yellow-600' :
-              'text-green-600'
+              riskScore >= 70 ? 'text-cyber-danger' :
+              riskScore >= 40 ? 'text-cyber-warning' :
+              'text-cyber-safe'
             }`}>
               {riskScore >= 70 ? 'HIGH' : riskScore >= 40 ? 'MED' : 'LOW'}
             </p>
           </div>
-          <div className="text-center p-2 bg-gray-50 rounded">
-            <p className="text-xs font-semibold text-gray-600 uppercase">Signals</p>
-            <p className="text-lg font-bold mt-1 text-gray-900">{detectedIndicators.length}</p>
+          <div className="text-center p-3 bg-secondary/40 rounded-lg border border-border">
+            <p className="text-xs font-semibold text-muted-foreground uppercase">Signals</p>
+            <p className="text-lg font-bold mt-1 text-foreground">{detectedIndicators.length}</p>
           </div>
-          <div className="text-center p-2 bg-gray-50 rounded">
-            <p className="text-xs font-semibold text-gray-600 uppercase">Decision</p>
+          <div className="text-center p-3 bg-secondary/40 rounded-lg border border-border">
+            <p className="text-xs font-semibold text-muted-foreground uppercase">Decision</p>
             <p className={`text-lg font-bold mt-1 ${decisionStyle.color}`}>{decision}</p>
           </div>
         </div>
