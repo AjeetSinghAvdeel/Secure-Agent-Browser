@@ -75,29 +75,28 @@ def evaluate_risk_policy(
           "reason": "..."
         }
     """
-    policy = load_policy(policy_mode)
     risk = _normalize_risk(risk_score)
     mode = (policy_mode or DEFAULT_POLICY_MODE).strip().lower()
+    risk_percent = int(round(risk * 100))
+    warn_threshold = 40
+    block_threshold = 70
 
-    block_threshold = policy["block_if_risk_above"]
-    warn_threshold = policy["warn_if_risk_above"]
-
-    if risk >= block_threshold:
+    if risk_percent >= block_threshold:
         decision = "BLOCK"
         reason = (
-            f"Risk score {risk:.2f} exceeds block threshold {block_threshold:.2f} "
+            f"Risk score {risk_percent} exceeds block threshold {block_threshold} "
             f"for '{mode}' policy."
         )
-    elif risk >= warn_threshold:
+    elif risk_percent >= warn_threshold:
         decision = "WARN"
         reason = (
-            f"Risk score {risk:.2f} exceeds warn threshold {warn_threshold:.2f} "
+            f"Risk score {risk_percent} exceeds warn threshold {warn_threshold} "
             f"for '{mode}' policy."
         )
     else:
         decision = "ALLOW"
         reason = (
-            f"Risk score {risk:.2f} is below warn threshold {warn_threshold:.2f} "
+            f"Risk score {risk_percent} is below warn threshold {warn_threshold} "
             f"for '{mode}' policy."
         )
 

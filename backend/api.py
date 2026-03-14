@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from html import unescape
+import re
 from typing import Any, Dict, List
 from urllib.parse import urlparse
 
@@ -10,12 +12,14 @@ from pydantic import BaseModel
 
 import domain_intel
 import explainability
+import llm_reasoner
 import ml_model
 import obfuscation
 import policy_engine
 import risk
 import scanner
 import threat_intel
+from action_mediator import evaluate_action as evaluate_mediated_action
 
 try:
     from firebase_admin import firestore
@@ -36,11 +40,19 @@ app.add_middleware(
 # In-memory history enables extension -> dashboard visibility in local setups
 # even when Firestore is unavailable.
 SCAN_HISTORY: List[Dict[str, Any]] = []
+ACTION_HISTORY: List[Dict[str, Any]] = []
 MAX_HISTORY = 500
+ACTION_AGGREGATION_WINDOW_SECONDS = 2.0
 
 
 class ScanRequest(BaseModel):
     url: str
+
+
+class ActionRequest(BaseModel):
+    url: str
+    action: str
+    action_context: Dict[str, Any] | None = None
 
 
 SIMULATOR_HOSTS = {"localhost", "127.0.0.1", "::1"}
@@ -97,11 +109,21 @@ def _decision_to_status(decision: str) -> str:
 
 
 def _predict_ml(html: str) -> float:
+    if hasattr(ml_model, "predict_attack_score"):
+        return float(ml_model.predict_attack_score(html))
     if hasattr(ml_model, "predict"):
         return float(ml_model.predict(html))
     if hasattr(ml_model, "predict_attack"):
         return float(ml_model.predict_attack(html))
     raise AttributeError("ml_model has no predict/predict_attack function")
+
+
+def _extract_text_content(html: str) -> str:
+    lowered = re.sub(r"(?is)<script.*?>.*?</script>", " ", html or "")
+    lowered = re.sub(r"(?is)<style.*?>.*?</style>", " ", lowered)
+    lowered = re.sub(r"(?s)<[^>]+>", " ", lowered)
+    lowered = unescape(lowered)
+    return re.sub(r"\s+", " ", lowered).strip()
 
 
 def _analyze_domain(url: str) -> Dict[str, Any]:
@@ -218,31 +240,173 @@ def _apply_signal_boosts(
     *,
     is_trusted: bool,
 ) -> Dict[str, Any]:
-    total = float(risk_data.get("total_risk", 0.0))
+    total = int(risk_data.get("risk_percent", round(float(risk_data.get("total_risk", 0.0)) * 100)))
+    bonus = 0
 
-    if len(obfuscation_flags) >= 2:
-        total += 0.15
-    if "prompt_injection_pattern" in semantic_flags:
-        total += 0.20
-    if "credential_harvest_form" in semantic_flags:
-        total += 0.10
-    if "phishing_content_pattern" in semantic_flags:
-        total += 0.10
-    if "phishing_keyword" in domain_flags:
-        total += 0.10
+    if "prompt_injection_pattern" in semantic_flags and "hidden_dom_element" in obfuscation_flags:
+        bonus += 8
+    if "credential_harvest_form" in semantic_flags and "phishing_keyword" in domain_flags:
+        bonus += 10
     if intel:
-        total += min(0.30, 0.20 * float(intel.get("confidence", 0.9)))
+        bonus += min(10, int(round(float(intel.get("confidence", 0.9)) * 10)))
 
-    # Trusted domains should not be escalated by weak heuristic-only signals.
-    if is_trusted and not intel:
-        if "prompt_injection_pattern" not in semantic_flags:
-            total = min(
-                total,
-                float(risk_data.get("total_risk", 0.0)) + 0.06,
-            )
+    if is_trusted and not intel and "prompt_injection_pattern" not in semantic_flags:
+        bonus = min(bonus, 4)
 
-    risk_data["total_risk"] = round(min(1.0, total), 4)
+    adjusted = max(0, min(100, total + bonus))
+    risk_data["risk_percent"] = adjusted
+    risk_data["total_risk"] = round(adjusted / 100.0, 4)
+    risk_data["confidence"] = adjusted
     return risk_data
+
+
+def _classify_attack(indicators: List[str]) -> str:
+    lowered = [str(item).lower() for item in indicators]
+
+    if any("prompt" in item and "inject" in item for item in lowered):
+        return "Prompt Injection"
+    if any("phishing" in item or "credential_harvest" in item for item in lowered):
+        return "Phishing"
+    if any(
+        token in item
+        for item in lowered
+        for token in ("base64", "hex", "unicode", "hidden", "obfuscat")
+    ):
+        return "Obfuscation"
+    if any("threat_intel" in item for item in lowered):
+        return "Known Threat"
+    return "Suspicious Content"
+
+
+def _signal_confidence(signal_type: str) -> str:
+    mapping = {
+        "prompt_injection": "high",
+        "prompt_injection_pattern": "high",
+        "credential_request": "high",
+        "credential_harvest_form": "high",
+        "phishing_intent": "high",
+        "phishing_content_pattern": "high",
+        "threat_intel_phishing": "critical",
+        "threat_intel_malware": "critical",
+        "threat_intel_malicious_url": "critical",
+        "hidden_dom_element": "medium",
+        "hex_payload": "medium",
+        "base64_blob": "low",
+        "obfuscated_script_pattern": "medium",
+        "suspicious_unicode": "medium",
+        "phishing_keyword": "medium",
+    }
+    return mapping.get(signal_type, "low")
+
+
+def _signal_severity(signal_type: str) -> str:
+    confidence = _signal_confidence(signal_type)
+    if confidence == "critical":
+        return "critical"
+    if signal_type in {
+        "prompt_injection",
+        "prompt_injection_pattern",
+        "credential_harvest_form",
+        "credential_request",
+    }:
+        return "critical"
+    if confidence == "high":
+        return "high"
+    if confidence == "medium":
+        return "medium"
+    return "low"
+
+
+def _build_signal_details(indicators: List[str]) -> List[Dict[str, str]]:
+    details: List[Dict[str, str]] = []
+    seen: set[str] = set()
+
+    for signal in indicators:
+        signal_type = str(signal)
+        if signal_type in seen:
+            continue
+        seen.add(signal_type)
+        details.append(
+            {
+                "type": signal_type,
+                "confidence": _signal_confidence(signal_type),
+                "severity": _signal_severity(signal_type),
+            }
+        )
+
+    return details
+
+
+def _audit_target(entry: Dict[str, Any]) -> str:
+    context = entry.get("action_context", {}) or {}
+    return str(context.get("target_text") or entry.get("url") or "").strip().lower()
+
+
+def _aggregate_action_audit(payload: Dict[str, Any]) -> Dict[str, Any]:
+    with_timestamp = {
+        **payload,
+        "timestamp": payload.get("timestamp")
+        or datetime.now(timezone.utc).isoformat(),
+    }
+    current_ts = datetime.fromisoformat(
+        str(with_timestamp["timestamp"]).replace("Z", "+00:00")
+    )
+
+    if ACTION_HISTORY:
+        latest = ACTION_HISTORY[0]
+        latest_ts = datetime.fromisoformat(
+            str(latest.get("timestamp", "")).replace("Z", "+00:00")
+        )
+        delta = (current_ts - latest_ts).total_seconds()
+        same_action = str(latest.get("action", "")).lower() == str(
+            with_timestamp.get("action", "")
+        ).lower()
+        same_target = _audit_target(latest) == _audit_target(with_timestamp)
+        if same_action and same_target and 0 <= delta < ACTION_AGGREGATION_WINDOW_SECONDS:
+            latest["count"] = int(latest.get("count", 1)) + 1
+            latest["timestamp"] = with_timestamp["timestamp"]
+            latest["decision"] = with_timestamp.get("decision", latest.get("decision"))
+            latest["reason"] = with_timestamp.get("reason", latest.get("reason"))
+            latest["risk"] = with_timestamp.get("risk", latest.get("risk"))
+            latest["attack_type"] = with_timestamp.get(
+                "attack_type", latest.get("attack_type")
+            )
+            latest["page_decision"] = with_timestamp.get(
+                "page_decision", latest.get("page_decision")
+            )
+            return latest
+
+    with_timestamp["count"] = int(with_timestamp.get("count", 1) or 1)
+    ACTION_HISTORY.insert(0, with_timestamp)
+    if len(ACTION_HISTORY) > MAX_HISTORY:
+        del ACTION_HISTORY[MAX_HISTORY:]
+    return with_timestamp
+
+
+def _persist_action_audit(payload: Dict[str, Any]) -> None:
+    with_timestamp = _aggregate_action_audit(payload)
+
+    if not db or not firestore:
+        return
+
+    try:
+        db.collection("action_audits").add(
+            {
+                "url": with_timestamp.get("url"),
+                "action": with_timestamp.get("action"),
+                "action_context": with_timestamp.get("action_context", {}),
+                "decision": with_timestamp.get("decision"),
+                "reason": with_timestamp.get("reason"),
+                "risk": int(with_timestamp.get("risk", 0)),
+                "count": int(with_timestamp.get("count", 1)),
+                "page_decision": with_timestamp.get("page_decision"),
+                "attack_type": with_timestamp.get("attack_type"),
+                "indicators": with_timestamp.get("indicators", []),
+                "timestamp": firestore.SERVER_TIMESTAMP,
+            }
+        )
+    except Exception:
+        pass
 
 
 def _build_explanation(
@@ -294,12 +458,18 @@ def _persist_scan(url: str, payload: Dict[str, Any]) -> None:
                 "status": _decision_to_status(str(with_timestamp.get("decision", "WARN"))),
                 "details": {
                     "reasons": with_timestamp.get("indicators", []),
+                    "signal_details": with_timestamp.get("signal_details", []),
                     "summary": with_timestamp.get("explanation", ""),
+                    "attack_type": with_timestamp.get("attack_type"),
+                    "analysis": with_timestamp.get("analysis"),
                 },
                 "policy": {
                     "decision": with_timestamp.get("decision", "WARN"),
-                    "reason": "Policy threshold evaluation",
+                    "reason": with_timestamp.get("reason", "Policy threshold evaluation"),
                 },
+                "actionType": with_timestamp.get("actionType"),
+                "action_log": with_timestamp.get("action_log"),
+                "attack_type": with_timestamp.get("attack_type"),
                 "timestamp": firestore.SERVER_TIMESTAMP,
             }
         )
@@ -318,7 +488,13 @@ def _run_pipeline(target_url: str) -> Dict[str, Any]:
     ml_score = _predict_ml(html)
     host_ctx = _host_context(target_url)
     semantic_data = _semantic_signal(html)
-    semantic_score = max(float(ml_score), float(semantic_data["score"]))
+    page_text = _extract_text_content(html)
+    llm_data = llm_reasoner.detect_malicious_intent(page_text)
+    semantic_score = max(
+        float(ml_score),
+        float(semantic_data["score"]),
+        float(llm_data["score"]),
+    )
 
     # 4. Domain intelligence
     domain_data = _analyze_domain(target_url)
@@ -327,17 +503,10 @@ def _run_pipeline(target_url: str) -> Dict[str, Any]:
     # 5. Obfuscation detection
     obfuscation_data = obfuscation.analyze_obfuscation(html)
 
-    # 6. Calculate risk
-    risk_data = risk.calculate_risk(
-        ml_score,
-        semantic_score,
-        float(domain_data["risk_penalty"]),
-        float(obfuscation_data["obfuscation_score"]),
-    )
-
     # 7. Policy decision
     domain_flags = list(domain_data.get("flags", []))
     semantic_flags = list(semantic_data.get("flags", []))
+    semantic_flags.extend([str(flag) for flag in llm_data.get("flags", [])])
     if intel and intel.get("threat"):
         domain_flags.append(f"threat_intel_{intel['threat']}")
 
@@ -352,8 +521,31 @@ def _run_pipeline(target_url: str) -> Dict[str, Any]:
     semantic_flags = refined["semantic_flags"]
     obfuscation_flags = refined["obfuscation_flags"]
 
+    indicators = [
+        *domain_flags,
+        *semantic_flags,
+        *obfuscation_flags,
+    ]
+    signal_details = _build_signal_details(indicators)
+    domain_trust = float(domain_data["trust_score"])
+    dom_suspicion_score = float(domain_data["risk_penalty"])
+    obfuscation_score = float(obfuscation_data["obfuscation_score"])
+    threat_intel_score = min(
+        1.0,
+        (float(intel.get("confidence", 0.0)) if intel else 0.0)
+        + (float(llm_data.get("score", 0.0)) * 0.35),
+    )
+
+    # 6. Calculate risk
     risk_data = _apply_signal_boosts(
-        risk_data=risk_data,
+        risk_data=risk.calculate_risk(
+            ml_score,
+            dom_suspicion_score,
+            obfuscation_score,
+            threat_intel_score,
+            domain_trust=domain_trust,
+            signals=signal_details,
+        ),
         domain_flags=domain_flags,
         obfuscation_flags=obfuscation_flags,
         semantic_flags=semantic_flags,
@@ -371,17 +563,37 @@ def _run_pipeline(target_url: str) -> Dict[str, Any]:
         decision=str(policy.get("decision", "WARN")),
     )
 
+    attack_type = _classify_attack(indicators)
+    if llm_data.get("attack_type") and llm_data.get("attack_type") != "Suspicious Content":
+        attack_type = str(llm_data["attack_type"])
+
+    explanation_reasons = list(explanation.get("reasons", []))
+    if domain_trust >= 90:
+        explanation_reasons.append("Domain reputation high")
+    elif domain_trust >= 75:
+        explanation_reasons.append("Domain reputation moderately high")
+
+    analysis = {
+        "title": "AI ANALYSIS",
+        "summary": explanation["summary"],
+        "key_findings": explanation_reasons[:6],
+        "policy_decision": policy["decision"],
+    }
+
     return {
         "url": target_url,
-        "risk": round(float(risk_data["total_risk"]) * 100),
+        "risk": int(risk_data["risk_percent"]),
+        "risk_score": round(float(risk_data["total_risk"]), 4),
         "decision": policy["decision"],
+        "reason": policy.get("reason", "Policy threshold evaluation"),
         "trust": domain_data["trust_score"],
-        "indicators": [
-            *domain_flags,
-            *semantic_flags,
-            *obfuscation_flags,
-        ],
+        "indicators": indicators,
+        "signal_details": signal_details,
+        "attack_type": attack_type,
         "explanation": explanation["summary"],
+        "explanation_reasons": explanation_reasons,
+        "analysis": analysis,
+        "llm": llm_data,
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
 
@@ -395,6 +607,12 @@ def root() -> Dict[str, str]:
 def scan_history(limit: int = 100) -> Dict[str, Any]:
     capped = max(1, min(limit, MAX_HISTORY))
     return {"scans": SCAN_HISTORY[:capped]}
+
+
+@app.get("/action_history")
+def action_history(limit: int = 100) -> Dict[str, Any]:
+    capped = max(1, min(limit, MAX_HISTORY))
+    return {"actions": ACTION_HISTORY[:capped]}
 
 
 @app.post("/analyze_url")
@@ -411,6 +629,67 @@ def analyze_url(req: ScanRequest, background_tasks: BackgroundTasks) -> Dict[str
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Scan failed: {exc}") from exc
+
+
+@app.post("/evaluate_action")
+def evaluate_action_endpoint(
+    req: ActionRequest,
+    background_tasks: BackgroundTasks,
+) -> Dict[str, Any]:
+    target_url = _normalize_url(req.url)
+    action_name = str(req.action or "").strip().lower()
+    if not target_url:
+        raise HTTPException(status_code=400, detail="Missing URL")
+    if not action_name:
+        raise HTTPException(status_code=400, detail="Missing action")
+
+    try:
+        scan_result = _run_pipeline(target_url)
+        normalized_risk = float(scan_result.get("risk_score", 0.0))
+        indicators = list(scan_result.get("indicators", []))
+        action_context = req.action_context or {}
+        mediation = evaluate_mediated_action(
+            action=action_name,
+            indicators=indicators,
+            risk=normalized_risk,
+            page_decision=str(scan_result.get("decision", "WARN")),
+            attack_type=str(scan_result.get("attack_type", "Suspicious Content")),
+            action_context=action_context,
+        )
+
+        response = {
+            "url": target_url,
+            "action": action_name,
+            "action_context": action_context,
+            "decision": mediation["decision"],
+            "reason": mediation["reason"],
+            "risk": int(scan_result.get("risk", 0)),
+            "attack_type": scan_result.get("attack_type", "Suspicious Content"),
+            "indicators": indicators,
+            "signal_details": scan_result.get("signal_details", []),
+            "trust": scan_result.get("trust"),
+            "explanation": scan_result.get("explanation"),
+            "analysis": scan_result.get("analysis"),
+            "page_decision": scan_result.get("decision", "WARN"),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "actionType": action_name,
+        }
+
+        response["action_log"] = {
+            "actionType": action_name,
+            "decision": response["decision"],
+            "reason": response["reason"],
+        }
+        background_tasks.add_task(_persist_action_audit, response)
+
+        if response["decision"] in {"BLOCK", "WARN"}:
+            background_tasks.add_task(_persist_scan, target_url, response)
+
+        return response
+    except scanner.ScanPipelineError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Action evaluation failed: {exc}") from exc
 
 
 @app.post("/scan")
