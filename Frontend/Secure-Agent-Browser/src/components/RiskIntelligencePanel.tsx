@@ -8,11 +8,13 @@ interface RiskIndicator {
   name: string;
   detected: boolean;
   severity?: 'low' | 'medium' | 'high' | 'critical';
+  confidence?: 'low' | 'medium' | 'high' | 'critical';
 }
 
 interface ExplanationData {
   summary: string;
   reasons?: string[];
+  policyDecision?: string;
 }
 
 interface RiskIntelligencePanelProps {
@@ -238,9 +240,10 @@ const RiskIntelligencePanel: React.FC<RiskIntelligencePanelProps> = ({
                     <p className="font-semibold text-sm leading-tight">
                       {indicator.name.replace(/_/g, ' ')}
                     </p>
-                    {indicator.severity && (
-                      <p className="text-xs opacity-75 mt-1 capitalize">{indicator.severity}</p>
-                    )}
+                    <p className="text-xs opacity-75 mt-1 capitalize">
+                      {indicator.severity || 'low'}
+                      {indicator.confidence ? ` • confidence ${indicator.confidence}` : ''}
+                    </p>
                   </div>
                 </div>
               ))}
@@ -286,6 +289,12 @@ const RiskIntelligencePanel: React.FC<RiskIntelligencePanelProps> = ({
                   </ul>
                 </div>
               )}
+              <div className="mt-3">
+                <p className="text-xs font-semibold text-primary uppercase">Policy Decision:</p>
+                <p className="text-sm text-foreground mt-1 font-semibold">
+                  {explanation.policyDecision || decision}
+                </p>
+              </div>
             </div>
           </div>
         </div>

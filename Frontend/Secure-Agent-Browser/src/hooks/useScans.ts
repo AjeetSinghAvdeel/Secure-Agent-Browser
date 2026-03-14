@@ -30,6 +30,13 @@ export type Scan = {
     confidence?: string;
     reason?: string;
   };
+  actionType?: string;
+  action_log?: {
+    actionType: string;
+    decision: "ALLOW" | "WARN" | "BLOCK";
+    reason: string;
+  };
+  attack_type?: string;
 
   policy?: {
     decision: "ALLOW" | "WARN" | "BLOCK";

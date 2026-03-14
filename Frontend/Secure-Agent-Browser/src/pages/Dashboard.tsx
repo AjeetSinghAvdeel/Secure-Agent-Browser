@@ -66,11 +66,41 @@ type Scan = {
     decision: "ALLOW" | "WARN" | "BLOCK";
     reason: string;
   };
+  actionType?: string;
+  action_log?: {
+    actionType: string;
+    decision: Decision;
+    reason: string;
+  };
+  attack_type?: string;
+  analysis?: {
+    title?: string;
+    summary?: string;
+    key_findings?: string[];
+    policy_decision?: Decision;
+  };
   agent_action?: {
     type: string;
     fields?: string[];
     confidence?: string;
     reason?: string;
+  };
+};
+
+type ActionAudit = {
+  url: string;
+  action: string;
+  count?: number;
+  decision: Decision;
+  reason: string;
+  risk: number;
+  attack_type?: string;
+  page_decision?: Decision;
+  timestamp?: any;
+  action_context?: {
+    source?: string;
+    target_text?: string;
+    input_type?: string;
   };
 };
 
@@ -128,6 +158,7 @@ const Dashboard = () => {
   const [expandedScan, setExpandedScan] = useState<string | null>(null);
   const [scanHistory, setScanHistory] = useState<Scan[]>([]);
   const [latestThreat, setLatestThreat] = useState<Scan | null>(null);
+  const [actionAudits, setActionAudits] = useState<ActionAudit[]>([]);
 
   const formatTime = (ts: any) => {
     if (ts?.toDate) return ts.toDate().toLocaleString();
@@ -137,24 +168,6 @@ const Dashboard = () => {
       if (!Number.isNaN(parsed.getTime())) return parsed.toLocaleString();
     }
     return "--";
-  };
-
-  const severityFromIndicator = (indicator: string) => {
-    if (
-      indicator.includes("suspicious_tld") ||
-      indicator.includes("phishing") ||
-      indicator.includes("base64")
-    ) {
-      return "high" as const;
-    }
-    if (
-      indicator.includes("hex") ||
-      indicator.includes("unicode") ||
-      indicator.includes("hidden")
-    ) {
-      return "medium" as const;
-    }
-    return "low" as const;
   };
 
   const scanDecision = (scan: Scan): Decision => {
@@ -255,6 +268,43 @@ const Dashboard = () => {
     return () => unsubscribe();
   }, []);
 
+  useEffect(() => {
+    let active = true;
+
+    const loadActionHistory = async () => {
+      try {
+        const response = await fetch("http://localhost:8000/action_history?limit=100");
+        if (!response.ok) return;
+        const payload = await response.json();
+        if (!active) return;
+        const actions = Array.isArray(payload?.actions) ? payload.actions : [];
+        setActionAudits(actions);
+      } catch (error) {
+        console.error("Action history fetch error:", error);
+      }
+    };
+
+    void loadActionHistory();
+    const intervalId = window.setInterval(() => {
+      void loadActionHistory();
+    }, 5000);
+
+    return () => {
+      active = false;
+      window.clearInterval(intervalId);
+    };
+  }, []);
+
+  const actionDecisionCount = (decision: Decision) =>
+    actionAudits
+      .filter((entry) => entry.decision === decision)
+      .reduce((total, entry) => total + (entry.count || 1), 0);
+
+  const totalActionEvents = actionAudits.reduce(
+    (total, entry) => total + (entry.count || 1),
+    0
+  );
+
   return (
     <div className="min-h-screen bg-background">
       <Navbar />
@@ -280,6 +330,31 @@ const Dashboard = () => {
 
           <div className="mb-8">
             <ThreatTimeline scans={scanHistory} />
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
+            <div className="glass rounded-xl p-5">
+              <p className="text-xs text-muted-foreground font-mono mb-1">
+                Agent Actions Audited
+              </p>
+              <p className="text-3xl font-bold font-mono">{totalActionEvents}</p>
+            </div>
+            <div className="glass rounded-xl p-5">
+              <p className="text-xs text-muted-foreground font-mono mb-1">
+                Allowed Actions
+              </p>
+              <p className="text-3xl font-bold font-mono text-cyber-safe">
+                {actionDecisionCount("ALLOW")}
+              </p>
+            </div>
+            <div className="glass rounded-xl p-5">
+              <p className="text-xs text-muted-foreground font-mono mb-1">
+                Stopped / Warned
+              </p>
+              <p className="text-3xl font-bold font-mono text-cyber-danger">
+                {actionDecisionCount("BLOCK") + actionDecisionCount("WARN")}
+              </p>
+            </div>
           </div>
 
           {/* Stats */}
@@ -318,6 +393,75 @@ const Dashboard = () => {
             )}
           </div>
 
+          <div className="glass rounded-xl overflow-hidden overflow-x-auto mb-8">
+            <div className="px-6 py-4 border-b">
+              <h2 className="text-lg font-semibold">Agent Action Audit Trail</h2>
+              <p className="text-xs text-muted-foreground font-mono mt-1">
+                Every mediated action is logged here, including approvals.
+              </p>
+            </div>
+            <table className="w-full text-sm table-fixed">
+              <thead>
+                <tr className="border-b text-xs font-mono text-muted-foreground">
+                  <th className="px-6 py-3 text-left">Time</th>
+                  <th className="px-4 py-3 text-left">Action</th>
+                  <th className="px-4 py-3 text-left">Target</th>
+                  <th className="px-4 py-3 text-left">Decision</th>
+                  <th className="px-4 py-3 text-left">Attack</th>
+                  <th className="px-4 py-3 text-left">Reason</th>
+                </tr>
+              </thead>
+              <tbody>
+                {actionAudits.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} className="px-6 py-6 text-sm text-muted-foreground">
+                      No action audits yet.
+                    </td>
+                  </tr>
+                ) : (
+                  actionAudits.map((entry, index) => {
+                    const decision = entry.decision;
+                    const status =
+                      decision === "ALLOW"
+                        ? statusConfig.safe
+                        : decision === "BLOCK"
+                        ? statusConfig.blocked
+                        : statusConfig.warning;
+
+                    return (
+                      <tr key={`${entry.timestamp || index}-${entry.action}-${entry.url}`} className="border-b">
+                        <td className="px-6 py-3 text-xs font-mono">
+                          {formatTime(entry.timestamp)}
+                        </td>
+                        <td className="px-4 py-3 text-xs font-mono">
+                          {entry.action}
+                          {(entry.count || 1) > 1 ? ` x${entry.count}` : ""}
+                        </td>
+                        <td
+                          title={entry.url}
+                          className="px-4 py-3 text-xs font-mono break-all"
+                        >
+                          {entry.action_context?.target_text || entry.url}
+                        </td>
+                        <td className="px-4 py-3">
+                          <span
+                            className={`inline-flex items-center gap-1 text-xs font-mono px-2 py-1 rounded-full border ${status.bg} ${status.color}`}
+                          >
+                            {decision}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-xs font-mono">
+                          {entry.attack_type || entry.page_decision || "Unknown"}
+                        </td>
+                        <td className="px-4 py-3 text-xs">{entry.reason}</td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+
           {/* Scan Table */}
           <div className="glass rounded-xl overflow-hidden overflow-x-auto">
             <table className="w-full text-sm table-fixed">
@@ -338,7 +482,11 @@ const Dashboard = () => {
                   const expanded = expandedScan === scan.id;
                   const decision = scanDecision(scan);
                   const indicators = Array.isArray(scan?.details?.reasons) ? scan.details.reasons : [];
+                  const signalDetails = Array.isArray(scan?.details?.signal_details) ? scan.details.signal_details : [];
+                  const analysis = scan.analysis || scan?.details?.analysis || {};
                   const summary = String(scan.analysisSummary || scan?.details?.summary || "No explanation available.");
+                  const actionLog = scan.action_log;
+                  const attackType = String(scan.attack_type || scan?.details?.attack_type || "Unknown");
 
                   return (
                     <Fragment key={scan.id}>
@@ -386,16 +534,37 @@ const Dashboard = () => {
                                 riskScore={Number(scan.risk ?? 0)}
                                 trustScore={resolveTrustScore(scan)}
                                 decision={decision}
-                                indicators={indicators.map((name: string) => ({
-                                  name,
+                                indicators={(signalDetails.length > 0 ? signalDetails : indicators.map((name: string) => ({
+                                  type: name,
+                                  severity: "low",
+                                  confidence: "low",
+                                }))).map((signal: any) => ({
+                                  name: String(signal.type || signal.name || "unknown"),
                                   detected: true,
-                                  severity: severityFromIndicator(String(name)),
+                                  severity: signal.severity || "low",
+                                  confidence: signal.confidence || "low",
                                 }))}
                                 explanation={{
-                                  summary,
-                                  reasons: indicators,
+                                  summary: String(analysis.summary || summary),
+                                  reasons: Array.isArray(analysis.key_findings) && analysis.key_findings.length > 0
+                                    ? analysis.key_findings
+                                    : indicators,
+                                  policyDecision: String(analysis.policy_decision || decision),
                                 }}
                               />
+                              {actionLog && (
+                                <div className="rounded-xl border border-cyber-danger/30 bg-cyber-danger/10 p-4">
+                                  <p className="font-mono mb-2">
+                                    <strong>Action Mediation Log:</strong>
+                                  </p>
+                                  <div className="space-y-1 font-mono">
+                                    <p>Action: {actionLog.actionType}</p>
+                                    <p>Decision: {actionLog.decision}</p>
+                                    <p>Reason: {actionLog.reason}</p>
+                                    <p>Attack Type: {attackType}</p>
+                                  </div>
+                                </div>
+                              )}
                               <div>
                                 <p className="font-mono mb-1">
                                   <strong>Analysis Reasons:</strong>
