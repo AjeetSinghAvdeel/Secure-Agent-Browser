@@ -24,7 +24,7 @@
         <input type="email" name="email" placeholder="Email" autocomplete="off" required />
         <input type="password" name="password" placeholder="Password" autocomplete="off" required />
         <input type="text" name="otp" placeholder="One-time code" autocomplete="off" />
-        <button type="submit">Verify Now</button>
+        <button id="verify-button" type="submit">Verify Now</button>
       </form>
 
       <!-- scanner bait flags -->
@@ -35,10 +35,20 @@
     </div>
 
     <script>
+      window.secureAgentScenario = {
+        title: "Credential Harvesting Page",
+        actions: [
+          { label: "Agent enters email", action: "enter_text", selector: 'input[name="email"]', value: "agent@example.com" },
+          { label: "Agent enters password", action: "enter_text", selector: 'input[name="password"]', value: "Sup3rSecret!" },
+          { label: "Agent submits form", action: "submit_form", selector: "#fake-login" }
+        ]
+      };
+
       document.getElementById("fake-login").addEventListener("submit", function (e) {
         e.preventDefault();
         alert("Simulation mode: no data was sent.");
       });
     </script>
+    <script src="../assets/agent-simulator.js"></script>
   </body>
 </html>
