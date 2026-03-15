@@ -6,36 +6,80 @@ import re
 from typing import Any, Dict, List
 from urllib.parse import urlparse
 
-from fastapi import BackgroundTasks, FastAPI, HTTPException
+import os
+
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-import domain_intel
-import explainability
-import llm_reasoner
-import ml_model
-import obfuscation
-import policy_engine
-import risk
-import scanner
-import threat_intel
-from action_mediator import evaluate_action as evaluate_mediated_action
+try:
+    import domain_intel
+    import explainability
+    import llm_reasoner
+    import ml_model
+    import obfuscation
+    import policy_engine
+    import risk
+    import scanner
+    import threat_intel
+    from action_mediator import evaluate_action as evaluate_mediated_action
+    from auth import router as auth_router
+    from auth_middleware import AuthenticatedUser, get_current_user, require_roles
+except Exception:  # pragma: no cover - package import fallback
+    from . import domain_intel, explainability, llm_reasoner, ml_model, obfuscation, policy_engine, risk, scanner, threat_intel  # type: ignore
+    from .action_mediator import evaluate_action as evaluate_mediated_action  # type: ignore
+    from .auth import router as auth_router  # type: ignore
+    from .auth_middleware import AuthenticatedUser, get_current_user, require_roles  # type: ignore
 
 try:
     from firebase_admin import firestore
     from firebase_client import db
 except Exception:  # pragma: no cover - optional in local/dev setups
-    firestore = None
-    db = None
+    try:
+        from firebase_admin import firestore
+        from .firebase_client import db  # type: ignore
+    except Exception:
+        firestore = None
+        db = None
+
+try:
+    from google.api_core.exceptions import FailedPrecondition
+except Exception:  # pragma: no cover - optional in local/dev setups
+    FailedPrecondition = Exception
 
 app = FastAPI(title="SecureAgent Backend")
 
+CORS_ORIGINS = [
+    origin.strip()
+    for origin in os.getenv(
+        "SECUREAGENT_CORS_ORIGINS",
+        ",".join(
+            [
+                "http://localhost:5173",
+                "http://127.0.0.1:5173",
+                "http://localhost:4173",
+                "http://127.0.0.1:4173",
+                "http://localhost:3000",
+                "http://127.0.0.1:3000",
+                "http://localhost:8080",
+                "http://127.0.0.1:8080",
+            ]
+        ),
+    ).split(",")
+    if origin.strip()
+]
+
+LOCAL_ORIGIN_REGEX = r"^https?://(localhost|127\.0\.0\.1|\[::1\])(?::\d+)?$"
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=CORS_ORIGINS,
+    allow_origin_regex=LOCAL_ORIGIN_REGEX,
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type"],
 )
+
+app.include_router(auth_router)
 
 # In-memory history enables extension -> dashboard visibility in local setups
 # even when Firestore is unavailable.
@@ -362,7 +406,8 @@ def _aggregate_action_audit(payload: Dict[str, Any]) -> Dict[str, Any]:
             with_timestamp.get("action", "")
         ).lower()
         same_target = _audit_target(latest) == _audit_target(with_timestamp)
-        if same_action and same_target and 0 <= delta < ACTION_AGGREGATION_WINDOW_SECONDS:
+        same_user = str(latest.get("user_id", "")) == str(with_timestamp.get("user_id", ""))
+        if same_action and same_target and same_user and 0 <= delta < ACTION_AGGREGATION_WINDOW_SECONDS:
             latest["count"] = int(latest.get("count", 1)) + 1
             latest["timestamp"] = with_timestamp["timestamp"]
             latest["decision"] = with_timestamp.get("decision", latest.get("decision"))
@@ -390,10 +435,16 @@ def _persist_action_audit(payload: Dict[str, Any]) -> None:
         return
 
     try:
-        db.collection("action_audits").add(
+        db.collection("agent_actions").add(
             {
+                "user_id": with_timestamp.get("user_id"),
                 "url": with_timestamp.get("url"),
                 "action": with_timestamp.get("action"),
+                "target": str(
+                    (with_timestamp.get("action_context", {}) or {}).get("target_text")
+                    or with_timestamp.get("url")
+                    or ""
+                ),
                 "action_context": with_timestamp.get("action_context", {}),
                 "decision": with_timestamp.get("decision"),
                 "reason": with_timestamp.get("reason"),
@@ -453,8 +504,14 @@ def _persist_scan(url: str, payload: Dict[str, Any]) -> None:
     try:
         db.collection("scans").add(
             {
+                "user_id": with_timestamp.get("user_id"),
                 "url": url,
                 "risk": int(with_timestamp.get("risk", 0)),
+                "risk_score": float(with_timestamp.get("risk_score", 0.0)),
+                "domain_trust": float(with_timestamp.get("trust", 0)),
+                "decision": with_timestamp.get("decision", "WARN"),
+                "signals": with_timestamp.get("signal_details", []),
+                "ai_analysis": with_timestamp.get("analysis", {}),
                 "status": _decision_to_status(str(with_timestamp.get("decision", "WARN"))),
                 "details": {
                     "reasons": with_timestamp.get("indicators", []),
@@ -598,31 +655,173 @@ def _run_pipeline(target_url: str) -> Dict[str, Any]:
     }
 
 
+def _serialize_firestore_doc(doc: Any) -> Dict[str, Any]:
+    return {"id": doc.id, **(doc.to_dict() or {})}
+
+
+def _sort_by_timestamp_desc(records: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def sort_key(record: Dict[str, Any]) -> float:
+        raw = record.get("timestamp") or record.get("time")
+        if hasattr(raw, "timestamp"):
+            try:
+                return float(raw.timestamp())
+            except Exception:
+                return 0.0
+        if hasattr(raw, "to_datetime"):
+            try:
+                return float(raw.to_datetime().timestamp())
+            except Exception:
+                return 0.0
+        try:
+            return datetime.fromisoformat(str(raw).replace("Z", "+00:00")).timestamp()
+        except Exception:
+            return 0.0
+
+    return sorted(records, key=sort_key, reverse=True)
+
+
+def _read_scans_for_user(user_id: str, limit: int) -> List[Dict[str, Any]]:
+    capped = max(1, min(limit, MAX_HISTORY))
+    if db and firestore:
+        try:
+            docs = (
+                db.collection("scans")
+                .where("user_id", "==", user_id)
+                .order_by("timestamp", direction=firestore.Query.DESCENDING)
+                .limit(capped)
+                .stream()
+            )
+            return [_serialize_firestore_doc(doc) for doc in docs]
+        except FailedPrecondition:
+            docs = (
+                db.collection("scans")
+                .where("user_id", "==", user_id)
+                .limit(capped)
+                .stream()
+            )
+            return _sort_by_timestamp_desc([_serialize_firestore_doc(doc) for doc in docs])[:capped]
+    return [scan for scan in SCAN_HISTORY if scan.get("user_id") == user_id][:capped]
+
+
+def _read_actions_for_user(user_id: str, limit: int) -> List[Dict[str, Any]]:
+    capped = max(1, min(limit, MAX_HISTORY))
+    if db and firestore:
+        try:
+            docs = (
+                db.collection("agent_actions")
+                .where("user_id", "==", user_id)
+                .order_by("timestamp", direction=firestore.Query.DESCENDING)
+                .limit(capped)
+                .stream()
+            )
+            return [_serialize_firestore_doc(doc) for doc in docs]
+        except FailedPrecondition:
+            docs = (
+                db.collection("agent_actions")
+                .where("user_id", "==", user_id)
+                .limit(capped)
+                .stream()
+            )
+            return _sort_by_timestamp_desc([_serialize_firestore_doc(doc) for doc in docs])[:capped]
+    return [action for action in ACTION_HISTORY if action.get("user_id") == user_id][:capped]
+
+
+def _read_all_scans(limit: int) -> List[Dict[str, Any]]:
+    capped = max(1, min(limit, MAX_HISTORY))
+    if db and firestore:
+        docs = (
+            db.collection("scans")
+            .order_by("timestamp", direction=firestore.Query.DESCENDING)
+            .limit(capped)
+            .stream()
+        )
+        return [_serialize_firestore_doc(doc) for doc in docs]
+    return SCAN_HISTORY[:capped]
+
+
+def _build_research_analytics(limit: int) -> Dict[str, Any]:
+    scans = _read_all_scans(limit)
+    totals = {"ALLOW": 0, "WARN": 0, "BLOCK": 0}
+    attacks: Dict[str, int] = {}
+    for scan in scans:
+        decision = str(scan.get("decision") or (scan.get("policy") or {}).get("decision") or "WARN")
+        if decision in totals:
+            totals[decision] += 1
+        attack_type = str(scan.get("attack_type") or (scan.get("details") or {}).get("attack_type") or "Unknown")
+        attacks[attack_type] = attacks.get(attack_type, 0) + 1
+    return {
+        "total_scans": len(scans),
+        "decisions": totals,
+        "attack_types": attacks,
+    }
+
+
 @app.get("/")
 def root() -> Dict[str, str]:
     return {"status": "SecureAgent API running"}
 
 
 @app.get("/scan_history")
-def scan_history(limit: int = 100) -> Dict[str, Any]:
-    capped = max(1, min(limit, MAX_HISTORY))
-    return {"scans": SCAN_HISTORY[:capped]}
+def scan_history(
+    limit: int = 100,
+    user: AuthenticatedUser = Depends(get_current_user),
+) -> Dict[str, Any]:
+    return {"scans": _read_scans_for_user(user.id, limit)}
 
 
 @app.get("/action_history")
-def action_history(limit: int = 100) -> Dict[str, Any]:
-    capped = max(1, min(limit, MAX_HISTORY))
-    return {"actions": ACTION_HISTORY[:capped]}
+def action_history(
+    limit: int = 100,
+    user: AuthenticatedUser = Depends(get_current_user),
+) -> Dict[str, Any]:
+    return {"actions": _read_actions_for_user(user.id, limit)}
+
+
+@app.get("/scans")
+def list_scans(
+    limit: int = 100,
+    user: AuthenticatedUser = Depends(get_current_user),
+) -> Dict[str, Any]:
+    return {"scans": _read_scans_for_user(user.id, limit)}
+
+
+@app.get("/scans/my")
+def list_my_scans(
+    limit: int = 100,
+    user: AuthenticatedUser = Depends(get_current_user),
+) -> Dict[str, Any]:
+    return {"scans": _read_scans_for_user(user.id, limit)}
+
+
+@app.get("/admin/all_scans")
+def admin_all_scans(
+    limit: int = 100,
+    user: AuthenticatedUser = Depends(require_roles("admin")),
+) -> Dict[str, Any]:
+    return {"scans": _read_all_scans(limit), "requested_by": user.id}
+
+
+@app.get("/research/analytics")
+def research_analytics(
+    limit: int = 500,
+    user: AuthenticatedUser = Depends(require_roles("admin", "researcher")),
+) -> Dict[str, Any]:
+    return {"analytics": _build_research_analytics(limit), "requested_by": user.id}
 
 
 @app.post("/analyze_url")
-def analyze_url(req: ScanRequest, background_tasks: BackgroundTasks) -> Dict[str, Any]:
+def analyze_url(
+    req: ScanRequest,
+    background_tasks: BackgroundTasks,
+    user: AuthenticatedUser = Depends(get_current_user),
+) -> Dict[str, Any]:
     target_url = _normalize_url(req.url)
     if not target_url:
         raise HTTPException(status_code=400, detail="Missing URL")
 
     try:
         response = _run_pipeline(target_url)
+        response["user_id"] = user.id
         background_tasks.add_task(_persist_scan, target_url, response)
         return response
     except scanner.ScanPipelineError as exc:
@@ -635,6 +834,7 @@ def analyze_url(req: ScanRequest, background_tasks: BackgroundTasks) -> Dict[str
 def evaluate_action_endpoint(
     req: ActionRequest,
     background_tasks: BackgroundTasks,
+    user: AuthenticatedUser = Depends(get_current_user),
 ) -> Dict[str, Any]:
     target_url = _normalize_url(req.url)
     action_name = str(req.action or "").strip().lower()
@@ -658,6 +858,7 @@ def evaluate_action_endpoint(
         )
 
         response = {
+            "user_id": user.id,
             "url": target_url,
             "action": action_name,
             "action_context": action_context,
@@ -693,5 +894,9 @@ def evaluate_action_endpoint(
 
 
 @app.post("/scan")
-def scan(req: ScanRequest, background_tasks: BackgroundTasks) -> Dict[str, Any]:
-    return analyze_url(req, background_tasks)
+def scan(
+    req: ScanRequest,
+    background_tasks: BackgroundTasks,
+    user: AuthenticatedUser = Depends(get_current_user),
+) -> Dict[str, Any]:
+    return analyze_url(req, background_tasks, user)
