@@ -1,44 +1,61 @@
 # SecureAgent: AI-Powered Intelligent Web Threat Detection
 
-SecureAgent is an end-to-end defensive system for detecting malicious webpages, mediating AI-agent browser actions, and auditing every security decision with explainable reasoning.
+SecureAgent is a multi-user browser security platform for detecting malicious webpages, mediating AI-agent browser actions, and auditing every security decision with explainable reasoning.
 
 It combines:
 - FastAPI backend threat analysis and policy enforcement
 - Chrome extension for page scanning and action interception
-- React dashboard with real-time scan and action audit visibility
+- React dashboard with authenticated, user-scoped visibility
+- Firebase Firestore storage and real-time listeners
 - Safe malicious simulation lab for local attack testing
 
 ---
 
-## What SecureAgent Does
-
-SecureAgent now protects both:
-- Browsing decisions: should the page be allowed, warned, or blocked?
-- Agent decisions: should an AI/browser agent be allowed to click, type, or submit?
-
-Core flow:
+## Architecture
 
 ```text
-Browser / AI Agent
+User Login
+   ↓
+JWT Authentication
    ↓
 SecureAgent Extension
    ↓
-Backend Threat Pipeline
-   ↓
-Risk Engine + Policy Engine
+Threat Detection Engine
    ↓
 Action Mediation Layer
    ↓
-ALLOW / WARN / BLOCK
+Risk Scoring + Policy Engine
    ↓
-Dashboard + Audit Trail
+Firestore (user scoped)
+   ↓
+Real-time Dashboard
 ```
+
+SecureAgent now protects both:
+- browsing decisions: should the page be allowed, warned, or blocked?
+- agent decisions: should an AI/browser agent be allowed to click, type, or submit?
 
 ---
 
-## Latest Implemented Features
+## Implemented Features
 
-### 1. Action Mediation
+### Multi-User Authentication
+
+SecureAgent now supports:
+- email/password registration and login
+- JWT-based sessions
+- Google sign-in through Firebase Auth
+- user-scoped scans and action history
+- protected dashboard and scan routes
+
+Supported roles:
+- `user`
+- `admin`
+- `researcher`
+
+Public sign-up creates standard `user` accounts only. Elevated roles must be provisioned separately.
+
+### Action Mediation
 
 The extension intercepts:
 - button clicks
@@ -50,121 +67,38 @@ Each action is sent to `POST /evaluate_action` before execution. SecureAgent can
 - warn the user / operator
 - block the action completely
 
-This makes the system realistic for AI-agent browsing scenarios, not just passive URL scanning.
+### Explainable AI Analysis
 
-### 2. Trusted Domain False Positive Reduction
-
-Risk scoring now uses:
-
-```text
-risk_score =
-    ml_score * 0.4 +
-    dom_suspicion_score * 0.3 +
-    obfuscation_score * 0.2 +
-    threat_intel_score * 0.1
-```
-
-Then a domain-trust modifier is applied:
-- `domain_trust >= 90` → risk × `0.4`
-- `domain_trust >= 75` → risk × `0.6`
-- `domain_trust >= 50` → risk × `0.8`
-
-This reduces false positives on legitimate sites such as `github.com`, where normal frontend code may contain:
-- Base64 blobs
-- hidden DOM nodes
-- encoded assets
-- hex-like strings
-
-### 3. Signal Confidence and Multi-Signal Risking
-
-Signals now carry confidence and severity metadata.
-
-Examples:
-- `base64_blob` → low confidence / low-medium impact
-- `hidden_dom_element` → medium confidence
-- `prompt_injection` → high severity
-- `threat_intel_*` → critical
-
-Risk increases more when signals occur together. Example:
-- prompt injection + hidden DOM → strong escalation
-- base64 + hex payload → moderate escalation
-- base64 alone → minimal increase
-
-### 4. Updated Decision Thresholds
-
-SecureAgent now uses:
-- `risk < 40` → `ALLOW`
-- `40 <= risk < 70` → `WARN`
-- `risk >= 70` → `BLOCK`
-
-### 5. Agent Action Audit Trail
-
-Every mediated action is audited, including approvals.
-
-Audit records include:
-- action
-- target
-- count
-- decision
-- attack type
-- reason
-- timestamp
-
-Repeated actions are aggregated within a 2-second window.
-
-Example:
-
-```json
-{
-  "action": "enter_text",
-  "target": "wikipedia search field",
-  "count": 6,
-  "decision": "ALLOW",
-  "attack_type": "None",
-  "reason": "Action appears safe"
-}
-```
-
-Instead of logging every keystroke separately, the dashboard shows:
-- `enter_text x6`
-- `click_button`
-- `submit_form`
-
-### 6. Explainable AI Analysis
-
-Every scan now carries explainability data, including:
-- AI Analysis summary
-- Key Findings
-- Policy Decision
+Every scan carries:
+- AI analysis summary
+- key findings
+- policy decision
 - signal severity and confidence
 
-Example format shown in the dashboard:
+### User-Scoped Dashboard
 
-```text
-AI ANALYSIS
+The dashboard now shows only records for the authenticated user:
+- scans
+- action audits
+- risk reports
 
-Key Findings:
-• Hidden DOM elements detected
-• Encoded payload patterns detected
-• Domain reputation high
+It reads from:
+- Firestore listeners for real-time updates
+- authenticated backend endpoints as a fallback/consistency path
 
-Policy Decision:
-WARN
-```
+### Extension Authentication
 
-### 7. Simulator-Driven Agent Testing
+The extension:
+- stores the SecureAgent JWT in `chrome.storage.local`
+- sends `Authorization: Bearer ...` to backend scan/action endpoints
+- syncs its token from the dashboard login flow
 
-The malicious simulator lab now includes an agent simulation harness.
+### Role-Based Access Control
 
-Each scenario page can trigger realistic agent-style actions through the real mediation pipeline:
-- autofill email / password
-- click a CTA or button
-- submit a form
-
-This allows you to prove that:
-- safe actions are approved
-- risky actions are warned or blocked
-- the outcome is logged in the audit trail
+Backend role checks now protect:
+- `GET /admin/all_scans` for `admin`
+- `GET /research/analytics` for `admin` and `researcher`
+- standard user routes for user-owned data only
 
 ---
 
@@ -173,31 +107,34 @@ This allows you to prove that:
 ```text
 Secure-Agent-Browser/
 ├── backend/
-│   ├── api.py                       # Main API and threat/action pipeline
-│   ├── action_mediator.py           # AI-agent action mediation rules
-│   ├── scanner.py                   # Page fetcher
-│   ├── threat_intel.py              # Threat intel lookups
-│   ├── domain_intel.py              # Domain analysis wrapper
-│   ├── domain_intelligence.py       # Deterministic domain trust scoring
-│   ├── obfuscation.py               # Obfuscation heuristics
-│   ├── risk.py                      # Weighted scoring + trust modifiers
-│   ├── policy_engine.py             # ALLOW/WARN/BLOCK thresholds
-│   ├── explainability.py            # Human-readable AI analysis
-│   ├── llm_reasoner.py              # Context-aware malicious intent logic
-│   └── ml_model.py                  # Supporting ML signal
+│   ├── api.py
+│   ├── auth.py
+│   ├── auth_middleware.py
+│   ├── action_mediator.py
+│   ├── scanner.py
+│   ├── threat_intel.py
+│   ├── domain_intel.py
+│   ├── domain_intelligence.py
+│   ├── obfuscation.py
+│   ├── risk.py
+│   ├── policy_engine.py
+│   ├── explainability.py
+│   ├── llm_reasoner.py
+│   └── ml_model.py
 │
 ├── Frontend/Secure-Agent-Browser/
+│   ├── src/context/AuthContext.tsx
+│   ├── src/components/ProtectedRoute.tsx
+│   ├── src/pages/Login.tsx
 │   ├── src/pages/Dashboard.tsx
-│   ├── src/components/
-│   │   ├── RiskIntelligencePanel.tsx
-│   │   ├── ThreatTimeline.tsx
-│   │   └── ThreatAlert.tsx
+│   ├── src/pages/ScanPage.tsx
+│   ├── src/lib/api.ts
 │   └── src/lib/firebase.ts
 │
 ├── secureagent-extension/
 │   ├── manifest.json
 │   ├── background.js
-│   ├── content.js                   # Action interception + visible mediation
+│   ├── content.js
 │   ├── warning.html
 │   ├── warning.js
 │   └── icons/
@@ -205,7 +142,7 @@ Secure-Agent-Browser/
 ├── malicious-simulator-lab/
 │   ├── index.html
 │   ├── assets/
-│   │   └── agent-simulator.js       # Local simulated agent harness
+│   │   └── agent-simulator.js
 │   └── pages/
 │       ├── phishing-login.html
 │       ├── prompt-injection.html
@@ -221,9 +158,41 @@ Secure-Agent-Browser/
 
 Base URL: `http://localhost:8000`
 
-### `POST /analyze_url`
+### Auth
 
-Analyzes a page and returns the page-level threat decision.
+#### `POST /auth/register`
+
+```json
+{
+  "email": "analyst@example.com",
+  "password": "qwerty12",
+  "role": "user"
+}
+```
+
+#### `POST /auth/login`
+
+```json
+{
+  "email": "analyst@example.com",
+  "password": "qwerty12"
+}
+```
+
+#### `POST /auth/google`
+
+Exchanges a Firebase Google ID token for a SecureAgent JWT.
+
+#### `GET /auth/me`
+
+Returns the authenticated user from the JWT.
+
+### Scanning
+
+#### `POST /analyze_url`
+#### `POST /scan`
+
+Authenticated page scan endpoints.
 
 Request:
 
@@ -239,6 +208,7 @@ Response:
 {
   "url": "https://example.com",
   "risk": 25,
+  "risk_score": 0.25,
   "decision": "ALLOW",
   "trust": 96,
   "indicators": ["base64_blob"],
@@ -260,15 +230,11 @@ Response:
 }
 ```
 
-### `POST /scan`
+### Action Mediation
 
-Compatibility alias for `/analyze_url`.
-
-### `POST /evaluate_action`
+#### `POST /evaluate_action`
 
 Evaluates an AI/browser agent action before execution.
-
-Request:
 
 ```json
 {
@@ -281,49 +247,87 @@ Request:
 }
 ```
 
-Response:
+### User Data
 
-```json
-{
-  "url": "http://localhost:8099/pages/phishing-login.html",
-  "action": "submit_form",
-  "decision": "BLOCK",
-  "reason": "Possible credential harvesting",
-  "risk": 92,
-  "attack_type": "Phishing"
-}
-```
+#### `GET /scans/my`
+#### `GET /scan_history`
+#### `GET /action_history`
 
-### `GET /scan_history`
+All three are authenticated and user-scoped.
 
-Returns recent page scans from in-memory history for local/dev visibility.
+### Restricted Routes
 
-### `GET /action_history`
+#### `GET /admin/all_scans`
 
-Returns recent mediated action audits, including aggregated repeated actions.
+Admin only.
+
+#### `GET /research/analytics`
+
+Admin or researcher only.
 
 ---
 
-## Dashboard
+## Firestore Data Model
 
-Main page:
-`Frontend/Secure-Agent-Browser/src/pages/Dashboard.tsx`
+Collections:
+- `users`
+- `scans`
+- `agent_actions`
 
-The dashboard now shows:
-- real-time scan table
-- Risk Intelligence Panel
-- domain trust
-- security decision
-- detected signals with severity and confidence
-- AI analysis and policy decision
-- Threat Timeline
-- latest blocked threat
-- Agent Action Audit Trail with aggregated actions
+### `users/{user_id}`
 
-Examples:
-- `enter_text x6`
-- `click_button`
-- `submit_form`
+```json
+{
+  "email": "analyst@example.com",
+  "role": "user",
+  "created_at": "..."
+}
+```
+
+### `scans/{scan_id}`
+
+```json
+{
+  "user_id": "...",
+  "url": "https://example.com",
+  "risk_score": 0.25,
+  "domain_trust": 96,
+  "decision": "ALLOW",
+  "signals": [],
+  "ai_analysis": {},
+  "timestamp": "..."
+}
+```
+
+### `agent_actions/{action_id}`
+
+```json
+{
+  "user_id": "...",
+  "action": "submit_form",
+  "target": "Verify Now",
+  "decision": "BLOCK",
+  "attack_type": "Phishing",
+  "reason": "Possible credential harvesting",
+  "timestamp": "..."
+}
+```
+
+---
+
+## Frontend
+
+Main app:
+- protected routes for `/dashboard`, `/scan`, and `/scan/:id`
+- login page at `/login`
+- user panel in the top navigation
+- backend-driven error messaging for auth
+- Google sign-in button backed by Firebase Auth
+
+Dashboard behavior:
+- real-time Firestore listeners for `scans` and `agent_actions`
+- backend polling fallback for `/scans/my` and `/action_history`
+- user-specific records only
 
 ---
 
@@ -336,10 +340,14 @@ Behavior:
 - redirects `WARN` / `BLOCK` page results to the extension warning flow
 - intercepts clicks, text entry, and form submissions
 - sends actions to `/evaluate_action`
-- shows visible action-review toasts
+- includes the JWT in all protected backend requests
 - blocks risky agent actions before execution
 
-This keeps the existing architecture but extends it into active agent defense.
+Token flow:
+- dashboard login stores JWT in local storage
+- dashboard posts the token to the page via `window.postMessage`
+- content script stores the token in `chrome.storage.local`
+- background/content scripts reuse the token for scans and action mediation
 
 ---
 
@@ -360,41 +368,7 @@ Test URLs:
 - `http://localhost:8099/pages/obfuscated-payload.html`
 - `http://localhost:8099/pages/combined-threat.html`
 
-Each scenario now includes a local agent simulator panel to test mediated actions through the real extension/backend flow.
-
-Safety notes:
-- no real credential exfiltration
-- no live malware
-- no persistence
-- all attack behavior is simulated/inert
-
----
-
-## Expected Outcomes
-
-Trusted site example:
-
-```text
-github.com
-Risk Score: 25
-Decision: ALLOW
-```
-
-Malicious page example:
-
-```text
-phishing-login.html
-Risk Score: 92
-Decision: BLOCK
-```
-
-Aggregated audit example:
-
-```text
-enter_text x6 wikipedia
-click_button search
-submit_form search
-```
+Each scenario includes a local agent simulator panel to test mediated actions through the real extension/backend flow.
 
 ---
 
@@ -407,8 +381,15 @@ From repo root:
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-pip install fastapi uvicorn requests tldextract pyyaml scikit-learn
+pip install fastapi uvicorn requests tldextract pyyaml scikit-learn firebase-admin python-jose bcrypt
 uvicorn backend.api:app --reload --host 0.0.0.0 --port 8000
+```
+
+Recommended env vars:
+
+```bash
+export SECUREAGENT_JWT_SECRET="replace-this-with-a-long-random-secret"
+export SECUREAGENT_CORS_ORIGINS="http://localhost:8080,http://127.0.0.1:8080"
 ```
 
 ### 2. Frontend
@@ -419,6 +400,12 @@ npm install
 npm run dev
 ```
 
+Optional:
+
+```bash
+export VITE_API_BASE_URL=http://localhost:8000
+```
+
 ### 3. Extension
 
 1. Open `chrome://extensions`
@@ -427,25 +414,48 @@ npm run dev
 4. Select `secureagent-extension/`
 5. Reload the extension after JS or manifest changes
 
----
+### 4. Google Sign-In
 
-## Detection Signals
-
-High-level signals currently used:
-- prompt injection markers
-- phishing / credential harvesting patterns
-- domain reputation and suspicious URL heuristics
-- hidden DOM elements
-- Base64 payload-like content
-- hex payload-like content
-- suspicious unicode usage
-- threat intel matches
-- context-aware intent reasoning
-- supporting ML classification
+In Firebase Console for project `agent-browser-366c1`:
+- enable `Google` under `Authentication` -> `Sign-in method`
+- set a support email
+- add `localhost` to Authorized Domains
 
 ---
 
-## Security and Ethics
+## Firestore Indexes
+
+For production, create composite indexes for:
+- `scans`: `user_id ASC`, `timestamp DESC`
+- `agent_actions`: `user_id ASC`, `timestamp DESC`
+
+The backend now falls back to a non-indexed query plus local sorting if those indexes are missing, but the indexes should still be created for correct production performance.
+
+---
+
+## Troubleshooting
+
+- Registration returns `500`:
+  - restart the backend after dependency or auth changes
+  - current auth path uses direct `bcrypt`, not `passlib`
+
+- Dashboard is blank:
+  - confirm you are logged in
+  - confirm the extension is sending authenticated requests
+  - confirm backend `/scans/my` and `/action_history` are returning `200`
+  - create the Firestore composite indexes for production
+
+- Google login fails with `auth/configuration-not-found`:
+  - enable Google sign-in in Firebase Authentication
+  - add `localhost` to Authorized Domains
+
+- Extension changes do not appear:
+  - reload the unpacked extension in `chrome://extensions`
+  - make sure Chrome is loading `/Users/mac/Desktop/Secure-Agent-Browser/secureagent-extension`
+
+---
+
+## Security Notes
 
 This project is for defensive security testing, browser safety research, and education.
 
@@ -454,21 +464,7 @@ Use only:
 - with explicit authorization
 - against safe local simulations unless you have permission
 
----
-
-## Troubleshooting
-
-- No scans in dashboard:
-  - confirm backend is running on `http://localhost:8000`
-  - confirm Firestore config in `Frontend/Secure-Agent-Browser/src/lib/firebase.ts`
-
-- Extension not blocking actions:
-  - reload the unpacked extension
-  - confirm `http://localhost:8000/evaluate_action` is reachable
-
-- Simulator panel appears but does nothing:
-  - confirm the extension content script is loaded on the simulator page
-  - verify the backend is running
-
-- Frontend build warning about CSS `@import` order:
-  - current project has a non-blocking CSS ordering warning during Vite build
+Next follow-up items to remember:
+- create Firestore composite indexes
+- set a strong production `SECUREAGENT_JWT_SECRET`
+- verify deployed Google auth configuration and authorized domains
