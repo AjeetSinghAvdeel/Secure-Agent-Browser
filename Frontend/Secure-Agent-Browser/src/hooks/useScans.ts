@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
-import { collection, onSnapshot, orderBy, query } from "firebase/firestore";
+import { collection, onSnapshot, orderBy, query, where } from "firebase/firestore";
 import { db } from "@/lib/firebase";
+import { useAuth } from "@/context/AuthContext";
 
 /* ---------------------------------- */
 /* Types */
@@ -49,13 +50,21 @@ export type Scan = {
 /* ---------------------------------- */
 
 export function useScans() {
+  const { user } = useAuth();
   const [scans, setScans] = useState<Scan[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    if (!user?.id) {
+      setScans([]);
+      setLoading(false);
+      return;
+    }
+
     // newest scans first (recommended)
     const q = query(
       collection(db, "scans"),
+      where("user_id", "==", user.id),
       orderBy("timestamp", "desc")
     );
 
@@ -70,7 +79,7 @@ export function useScans() {
     });
 
     return () => unsub();
-  }, []);
+  }, [user?.id]);
 
   return { scans, loading };
 }

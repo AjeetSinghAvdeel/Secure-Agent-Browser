@@ -1,11 +1,13 @@
 import { useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { Menu, X } from "lucide-react";
+import { useAuth } from "@/context/AuthContext";
 
 const Navbar = () => {
   const [mobileOpen, setMobileOpen] = useState(false);
   const location = useLocation();
   const isLanding = location.pathname === "/";
+  const { user, logout } = useAuth();
 
   const scrollLinks = [
     { label: "How It Works", href: "#how-it-works" },
@@ -51,10 +53,34 @@ const Navbar = () => {
           </Link>
           <Link
             to="/dashboard"
-            className="text-sm font-medium bg-primary/10 text-primary border border-primary/30 px-4 py-2 rounded-lg hover:bg-primary/20 transition-colors"
+            className="text-sm text-muted-foreground hover:text-primary transition-colors"
           >
             View Dashboard
           </Link>
+          {user ? (
+            <div className="flex items-center gap-3">
+              <div className="text-right">
+                <p className="text-sm font-medium truncate max-w-[220px]">{user.email}</p>
+                <p className="text-[11px] font-mono uppercase tracking-wide text-muted-foreground">
+                  {user.role}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={logout}
+                className="text-sm font-medium bg-primary/10 text-primary border border-primary/30 px-4 py-2 rounded-lg hover:bg-primary/20 transition-colors"
+              >
+                Logout
+              </button>
+            </div>
+          ) : (
+            <Link
+              to="/login"
+              className="text-sm font-medium bg-primary/10 text-primary border border-primary/30 px-4 py-2 rounded-lg hover:bg-primary/20 transition-colors"
+            >
+              Login
+            </Link>
+          )}
         </div>
 
         {/* Mobile toggle */}
@@ -90,10 +116,38 @@ const Navbar = () => {
           <Link
             to="/dashboard"
             onClick={() => setMobileOpen(false)}
-            className="block text-sm font-medium bg-primary/10 text-primary border border-primary/30 px-4 py-2 rounded-lg hover:bg-primary/20 transition-colors text-center"
+            className="block text-sm text-muted-foreground hover:text-primary transition-colors py-2"
           >
             View Dashboard
           </Link>
+          {user ? (
+            <>
+              <div className="border border-border rounded-lg px-4 py-3">
+                <p className="text-sm font-medium">{user.email}</p>
+                <p className="text-[11px] font-mono uppercase tracking-wide text-muted-foreground">
+                  {user.role}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  logout();
+                  setMobileOpen(false);
+                }}
+                className="block w-full text-sm font-medium bg-primary/10 text-primary border border-primary/30 px-4 py-2 rounded-lg hover:bg-primary/20 transition-colors text-center"
+              >
+                Logout
+              </button>
+            </>
+          ) : (
+            <Link
+              to="/login"
+              onClick={() => setMobileOpen(false)}
+              className="block text-sm font-medium bg-primary/10 text-primary border border-primary/30 px-4 py-2 rounded-lg hover:bg-primary/20 transition-colors text-center"
+            >
+              Login
+            </Link>
+          )}
         </div>
       )}
     </nav>

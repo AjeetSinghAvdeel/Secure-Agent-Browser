@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import { Link } from "react-router-dom";
-import { collection, onSnapshot } from "firebase/firestore";
+import { collection, onSnapshot, orderBy, query, where } from "firebase/firestore";
 import {
   ArrowLeft,
   AlertTriangle,
@@ -17,6 +17,8 @@ import RiskIntelligencePanel from "@/components/RiskIntelligencePanel";
 import ThreatTimeline from "@/components/ThreatTimeline";
 import ThreatAlert from "@/components/ThreatAlert";
 import { db } from "@/lib/firebase";
+import { useAuth } from "@/context/AuthContext";
+import { apiFetch } from "@/lib/api";
 
 /* ---------------------------------- */
 /* UI CONFIG */
@@ -153,6 +155,7 @@ const calculateDomainTrustFallback = (url: string): number => {
 /* ---------------------------------- */
 
 const Dashboard = () => {
+  const { user, token, logout } = useAuth();
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [expandedScan, setExpandedScan] = useState<string | null>(null);
@@ -237,63 +240,133 @@ const Dashboard = () => {
   const warnCount = scanHistory.filter((s) => scanStatus(s) === "warning").length;
   const blockCount = scanHistory.filter((s) => scanStatus(s) === "blocked").length;
 
+  const applyScans = (scans: Scan[]) => {
+    const sorted = [...scans].sort((a, b) => scanTimeMs(b) - scanTimeMs(a));
+    setScanHistory(sorted);
+
+    const blocked = sorted.find((s) => s.decision === "BLOCK");
+    if (blocked) {
+      setLatestThreat(blocked);
+    } else {
+      setLatestThreat(null);
+    }
+  };
+
+  const loadBackendScans = async () => {
+    if (!token) return;
+
+    const response = await apiFetch(
+      "/scans/my?limit=100",
+      {
+        method: "GET",
+      },
+      token
+    );
+
+    if (response.status === 401) {
+      logout();
+      return;
+    }
+
+    if (!response.ok) {
+      throw new Error(`Scan history fetch failed: ${response.status}`);
+    }
+
+    const payload = (await response.json()) as { scans?: Scan[] };
+    applyScans(Array.isArray(payload.scans) ? payload.scans : []);
+  };
+
+  const loadBackendActions = async () => {
+    if (!token) return;
+
+    const response = await apiFetch(
+      "/action_history?limit=100",
+      {
+        method: "GET",
+      },
+      token
+    );
+
+    if (response.status === 401) {
+      logout();
+      return;
+    }
+
+    if (!response.ok) {
+      throw new Error(`Action history fetch failed: ${response.status}`);
+    }
+
+    const payload = (await response.json()) as { actions?: ActionAudit[] };
+    setActionAudits(Array.isArray(payload.actions) ? payload.actions : []);
+  };
+
   useEffect(() => {
+    if (!user?.id || !token) {
+      setScanHistory([]);
+      setLatestThreat(null);
+      return;
+    }
+
+    void loadBackendScans();
+    const pollId = window.setInterval(() => {
+      void loadBackendScans();
+    }, 3000);
+
     const unsubscribe = onSnapshot(
-      collection(db, "scans"),
+      query(
+        collection(db, "scans"),
+        where("user_id", "==", user.id),
+        orderBy("timestamp", "desc")
+      ),
       (snapshot) => {
         const scans = snapshot.docs.map((doc) => ({
           id: doc.id,
           ...(doc.data() as Omit<Scan, "id">),
         }));
-        const sorted = scans.sort((a, b) => {
-          const aTime = new Date(String(a.time || a.timestamp || 0)).getTime();
-          const bTime = new Date(String(b.time || b.timestamp || 0)).getTime();
-          return (Number.isFinite(bTime) ? bTime : 0) - (Number.isFinite(aTime) ? aTime : 0);
-        });
-
-        setScanHistory(sorted);
-
-        const blocked = sorted.find((s) => s.decision === "BLOCK");
-        if (blocked) {
-          setLatestThreat(blocked);
-        } else {
-          setLatestThreat(null);
-        }
+        applyScans(scans);
       },
       (error) => {
         console.error("Firestore listener error:", error);
       }
     );
 
-    return () => unsubscribe();
-  }, []);
+    return () => {
+      window.clearInterval(pollId);
+      unsubscribe();
+    };
+  }, [user?.id, token]);
 
   useEffect(() => {
-    let active = true;
+    if (!user?.id || !token) {
+      setActionAudits([]);
+      return;
+    }
 
-    const loadActionHistory = async () => {
-      try {
-        const response = await fetch("http://localhost:8000/action_history?limit=100");
-        if (!response.ok) return;
-        const payload = await response.json();
-        if (!active) return;
-        const actions = Array.isArray(payload?.actions) ? payload.actions : [];
+    void loadBackendActions();
+    const pollId = window.setInterval(() => {
+      void loadBackendActions();
+    }, 3000);
+
+    const unsubscribe = onSnapshot(
+      query(
+        collection(db, "agent_actions"),
+        where("user_id", "==", user.id),
+        orderBy("timestamp", "desc")
+      ),
+      (snapshot) => {
+        const actions = snapshot.docs.map((doc) => doc.data() as ActionAudit);
         setActionAudits(actions);
-      } catch (error) {
-        console.error("Action history fetch error:", error);
+      },
+      (error) => {
+        console.error("Agent action listener error:", error);
       }
-    };
-
-    void loadActionHistory();
-    const intervalId = window.setInterval(() => {
-      void loadActionHistory();
-    }, 5000);
+    );
 
     return () => {
-      active = false;
-      window.clearInterval(intervalId);
+      window.clearInterval(pollId);
+      unsubscribe();
     };
-  }, []);
+  }, [user?.id, token]);
 
   const actionDecisionCount = (decision: Decision) =>
     actionAudits

@@ -4,6 +4,8 @@ import { Loader2, Search, ShieldAlert } from "lucide-react";
 
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
+import { useAuth } from "@/context/AuthContext";
+import { apiFetch } from "@/lib/api";
 
 const DEMO_ATTACKS = [
   {
@@ -21,6 +23,7 @@ const DEMO_ATTACKS = [
 ];
 
 const ScanPage = () => {
+  const { token, logout } = useAuth();
   const [url, setUrl] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -54,11 +57,20 @@ const ScanPage = () => {
     setError(null);
 
     try {
-      const res = await fetch("http://127.0.0.1:8000/scan", {
+      const res = await apiFetch(
+        "/scan",
+        {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ url: normalizedTarget }),
-      });
+        },
+        token
+      );
+
+      if (res.status === 401) {
+        logout();
+        navigate("/login", { replace: true });
+        throw new Error("Unauthorized");
+      }
 
       if (!res.ok) throw new Error(await res.text());
 
