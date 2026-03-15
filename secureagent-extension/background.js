@@ -1,11 +1,25 @@
 const API_URL = "http://localhost:8000/scan";
 const BYPASS_TTL_MS = 2 * 60 * 1000;
 const SAFE_NOTIFY_TTL_MS = 15000;
+const AUTH_NOTIFY_TTL_MS = 15000;
 
 const pendingByTab = new Map();
 const bypassByTab = new Map();
 const safeNotifyCache = new Map();
 const pendingResultByTab = new Map();
+let lastAuthNotifyAt = 0;
+
+function isLocalDashboardUrl(url) {
+  try {
+    const parsed = new URL(url);
+    return (
+      (parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1") &&
+      ["8080", "5173", "4173", "3000"].includes(parsed.port || "")
+    );
+  } catch (_) {
+    return false;
+  }
+}
 
 function shouldSkip(url) {
   return (
@@ -40,17 +54,105 @@ function consumeBypass(tabId, url) {
   return false;
 }
 
+function getStoredToken() {
+  return new Promise((resolve) => {
+    chrome.storage.local.get(["token"], (result) => {
+      resolve(result?.token || null);
+    });
+  });
+}
+
+function setStoredToken(token) {
+  return new Promise((resolve) => {
+    if (token) {
+      chrome.storage.local.set({ token }, () => resolve());
+      return;
+    }
+    chrome.storage.local.remove(["token"], () => resolve());
+  });
+}
+
+function clearStoredToken() {
+  return new Promise((resolve) => {
+    chrome.storage.local.remove(["token"], () => resolve());
+  });
+}
+
+async function syncTokenFromDashboardTabs() {
+  const tabs = await chrome.tabs.query({});
+  const dashboardTabs = tabs.filter((tab) => tab.id && isLocalDashboardUrl(tab.url || ""));
+  for (const tab of dashboardTabs) {
+    try {
+      const results = await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        func: () => window.localStorage.getItem("secureagent_token"),
+      });
+      const token = results?.[0]?.result;
+      if (token) {
+        await setStoredToken(token);
+        return token;
+      }
+    } catch (_) {
+      // ignore tabs where script injection is not available
+    }
+  }
+  return null;
+}
+
+function notifyAuthRequired() {
+  const now = Date.now();
+  if (now - lastAuthNotifyAt < AUTH_NOTIFY_TTL_MS) return;
+  lastAuthNotifyAt = now;
+
+  try {
+    chrome.notifications.create(`secureagent-auth-${now}`, {
+      type: "basic",
+      iconUrl: "icons/secureagent-128.png",
+      title: "SecureAgent requires login",
+      message: "Login in the SecureAgent dashboard to enable protected scanning.",
+      priority: 1,
+    });
+  } catch (_) {
+    // ignore notification failures
+  }
+}
+
 async function analyzeUrl(url) {
+  let token = await getStoredToken();
+  if (!token) {
+    token = await syncTokenFromDashboardTabs();
+  }
+  if (!token) {
+    notifyAuthRequired();
+    return null;
+  }
+
   const res = await fetch(API_URL, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
     body: JSON.stringify({ url }),
   });
+  if (res.status === 401) {
+    await clearStoredToken();
+    notifyAuthRequired();
+    throw new Error("SecureAgent requires login");
+  }
   if (!res.ok) {
     throw new Error(`SecureAgent API error: ${res.status}`);
   }
   return res.json();
 }
+
+chrome.runtime.onStartup?.addListener(() => {
+  void syncTokenFromDashboardTabs();
+});
+
+chrome.runtime.onInstalled?.addListener(() => {
+  void syncTokenFromDashboardTabs();
+});
 
 function toWarningUrl(result, url, mode) {
   const params = new URLSearchParams({
@@ -124,6 +226,9 @@ function scheduleScan(details) {
   (async () => {
     try {
       const result = await analyzeUrl(url);
+      if (!result) {
+        return;
+      }
       const decision = String(result?.decision || "WARN").toUpperCase();
 
       if (decision === "BLOCK" || decision === "WARN") {

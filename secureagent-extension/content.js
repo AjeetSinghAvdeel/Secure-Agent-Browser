@@ -4,6 +4,24 @@ const allowedReplayClicks = new WeakSet();
 const allowedReplayForms = new WeakSet();
 const bypassedInputs = new WeakSet();
 
+function getStoredToken() {
+  return new Promise((resolve) => {
+    chrome.storage.local.get(["token"], (result) => {
+      resolve(result?.token || null);
+    });
+  });
+}
+
+function setStoredToken(token) {
+  return new Promise((resolve) => {
+    if (token) {
+      chrome.storage.local.set({ token }, () => resolve());
+      return;
+    }
+    chrome.storage.local.remove(["token"], () => resolve());
+  });
+}
+
 function ensureToastHost() {
   let host = document.getElementById("secureagent-toast-host");
   if (host) return host;
@@ -98,15 +116,44 @@ function emitAuditEvent(result) {
 }
 
 async function evaluatePageAction(action, actionContext = {}) {
+  const token = await getStoredToken();
+  if (!token) {
+    showMediationToast(
+      {
+        decision: "WARN",
+        reason: "SecureAgent requires login",
+        risk: 0,
+      },
+      "SecureAgent Authentication"
+    );
+    throw new Error("SecureAgent requires login");
+  }
+
   const response = await fetch(ACTION_API_URL, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
     body: JSON.stringify({
       url: window.location.href,
       action,
       action_context: actionContext,
     }),
   });
+
+  if (response.status === 401) {
+    await setStoredToken(null);
+    showMediationToast(
+      {
+        decision: "WARN",
+        reason: "SecureAgent requires login",
+        risk: 0,
+      },
+      "SecureAgent Authentication"
+    );
+    throw new Error("SecureAgent requires login");
+  }
 
   if (!response.ok) {
     throw new Error(`SecureAgent action API error: ${response.status}`);
@@ -199,6 +246,12 @@ function handleDecisionFeedback(result, options = {}) {
     window.alert("SecureAgent blocked this action: " + String(result.reason || "Unknown reason"));
   }
 }
+
+window.addEventListener("message", (event) => {
+  if (event.source !== window) return;
+  if (event.data?.type !== "SECURE_AGENT_AUTH") return;
+  void setStoredToken(event.data?.token || null);
+});
 
 document.addEventListener(
   "click",
