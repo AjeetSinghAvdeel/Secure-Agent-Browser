@@ -463,8 +463,3 @@ Use only:
 - in controlled environments
 - with explicit authorization
 - against safe local simulations unless you have permission
-
-Next follow-up items to remember:
-- create Firestore composite indexes
-- set a strong production `SECUREAGENT_JWT_SECRET`
-- verify deployed Google auth configuration and authorized domains
