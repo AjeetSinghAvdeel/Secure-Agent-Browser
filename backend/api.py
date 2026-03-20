@@ -25,11 +25,13 @@ try:
     from action_mediator import evaluate_action as evaluate_mediated_action
     from auth import router as auth_router
     from auth_middleware import AuthenticatedUser, get_current_user, require_roles
+    from metrics import get_tracker, MetricsTracker
 except Exception:  # pragma: no cover - package import fallback
     from . import domain_intel, explainability, llm_reasoner, ml_model, obfuscation, policy_engine, risk, scanner, threat_intel  # type: ignore
     from .action_mediator import evaluate_action as evaluate_mediated_action  # type: ignore
     from .auth import router as auth_router  # type: ignore
     from .auth_middleware import AuthenticatedUser, get_current_user, require_roles  # type: ignore
+    from .metrics import get_tracker, MetricsTracker  # type: ignore
 
 try:
     from firebase_admin import firestore
@@ -81,6 +83,86 @@ app.add_middleware(
 
 app.include_router(auth_router)
 
+
+# ============================================================================
+# Startup Event Handler - Initializes all subsystems on server start
+# ============================================================================
+
+@app.on_event("startup")
+async def startup_event():
+    """
+    Initialize all SecureAgent subsystems when the uvicorn server starts.
+    This ensures metrics tracking, task success measurement, and optional
+    Firebase persistence are ready without requiring additional commands.
+    """
+    try:
+        # Initialize metrics tracker
+        tracker = get_tracker()
+        print(f"✓ Metrics tracker initialized (TP=0, FP=0, TN=0, FN=0)")
+    except Exception as e:
+        print(f"⚠ Metrics initialization warning: {e}")
+    
+    try:
+        # Initialize Firebase metrics (optional, gracefully degrades if unavailable)
+        from firebase_metrics import setup_metrics_persistence
+        setup_metrics_persistence()
+        print("✓ Firebase metrics persistence initialized (optional)")
+    except Exception:
+        print("⊘ Firebase metrics not available (optional, continuing without cloud persistence)")
+    
+    try:
+        # Initialize task success harness
+        from task_success_harness import TaskSuccessHarness
+        harness = TaskSuccessHarness()
+        harness.register_default_scenarios()
+        print("✓ Task success measurement harness initialized")
+    except Exception as e:
+        print(f"⚠ Task success harness warning: {e}")
+    
+    print("\n✅ SecureAgent startup complete. Ready to process requests.")
+
+
+@app.get("/health")
+def health_check():
+    """
+    Health check endpoint for SecureAgent backend.
+    
+    Returns current status of all subsystems:
+    - status: Overall health status (healthy/degraded)
+    - metrics_ready: Metrics tracking is initialized
+    - firebase_ready: Optional Firebase persistence is available
+    - timestamp: Server time in ISO 8601 format
+    
+    Example response:
+    {
+        "status": "healthy",
+        "metrics_ready": true,
+        "firebase_ready": true,
+        "timestamp": "2024-01-15T10:30:00Z"
+    }
+    """
+    try:
+        tracker = get_tracker()
+        metrics_active = tracker is not None
+    except:
+        metrics_active = False
+    
+    try:
+        from firebase_admin import firestore
+        firebase_available = firestore is not None
+    except:
+        firebase_available = False
+    
+    overall_status = "healthy" if metrics_active else "degraded"
+    
+    return {
+        "status": overall_status,
+        "metrics_ready": metrics_active,
+        "firebase_ready": firebase_available,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+
+
 # In-memory history enables extension -> dashboard visibility in local setups
 # even when Firestore is unavailable.
 SCAN_HISTORY: List[Dict[str, Any]] = []
@@ -91,6 +173,7 @@ ACTION_AGGREGATION_WINDOW_SECONDS = 2.0
 
 class ScanRequest(BaseModel):
     url: str
+    ground_truth: str | None = None  # "malicious" or "benign" for evaluation
 
 
 class ActionRequest(BaseModel):
@@ -822,6 +905,29 @@ def analyze_url(
     try:
         response = _run_pipeline(target_url)
         response["user_id"] = user.id
+        
+        # Update metrics if ground truth is provided
+        if req.ground_truth and req.ground_truth.lower() in ("malicious", "benign"):
+            tracker = get_tracker()
+            metrics_update = tracker.update_metrics(
+                risk_score=float(response.get("risk_score", 0.0)),
+                ground_truth=req.ground_truth.lower(),  # type: ignore
+                url=target_url,
+                confidence=float(response.get("confidence", 1.0)),
+                attack_type=response.get("attack_type"),
+                indicators=response.get("indicators", []),
+                analysis_details={
+                    "has_phishing_patterns": "phishing" in str(response.get("indicators", [])).lower(),
+                    "has_injection_patterns": "injection" in str(response.get("indicators", [])).lower(),
+                    "obfuscated": any(
+                        term in str(response.get("indicators", [])).lower()
+                        for term in ["base64", "hex", "obfuscation"]
+                    ),
+                    "is_trusted_domain": response.get("trust", 0) > 70,
+                },
+            )
+            response["metrics_update"] = metrics_update
+        
         background_tasks.add_task(_persist_scan, target_url, response)
         return response
     except scanner.ScanPipelineError as exc:
@@ -900,3 +1006,250 @@ def scan(
     user: AuthenticatedUser = Depends(get_current_user),
 ) -> Dict[str, Any]:
     return analyze_url(req, background_tasks, user)
+
+
+@app.get("/metrics")
+def get_metrics(user: AuthenticatedUser = Depends(get_current_user)) -> Dict[str, Any]:
+    """
+    GET /metrics
+    
+    Returns computed metrics for threat detection system evaluation.
+    
+    Response includes:
+    - Confusion matrix (TP, FP, TN, FN)
+    - Precision, Recall, F1 Score
+    - False Positive/Negative Rates
+    - Accuracy and Specificity
+    - Current timestamp and sample counts
+    
+    Example response:
+    {
+        "timestamp": "2026-03-20T10:30:00+00:00",
+        "precision": 0.92,
+        "recall": 0.88,
+        "f1_score": 0.90,
+        "false_positive_rate": 0.03,
+        "false_negative_rate": 0.12,
+        "accuracy": 0.95,
+        "specificity": 0.97,
+        "confusion_matrix": {
+            "tp": 230,
+            "fp": 20,
+            "tn": 500,
+            "fn": 30,
+            "total": 780
+        }
+    }
+    """
+    tracker = get_tracker()
+    metrics = tracker.compute_metrics()
+    
+    return {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        **metrics,
+        "user_id": user.id,
+    }
+
+
+@app.get("/metrics/snapshot")
+def get_metrics_snapshot(user: AuthenticatedUser = Depends(get_current_user)) -> Dict[str, Any]:
+    """
+    GET /metrics/snapshot
+    
+    Returns timestamped metrics snapshot and adds to history.
+    
+    Example response:
+    {
+        "timestamp": "2026-03-20T10:30:00+00:00",
+        "tp": 230,
+        "fp": 20,
+        "tn": 500,
+        "fn": 30,
+        "precision": 0.92,
+        "recall": 0.88,
+        "f1_score": 0.90,
+        "false_positive_rate": 0.03,
+        "false_negative_rate": 0.12,
+        "accuracy": 0.95,
+        "specificity": 0.97
+    }
+    """
+    tracker = get_tracker()
+    snapshot = tracker.get_metrics_snapshot()
+    
+    from dataclasses import asdict
+    return {
+        **asdict(snapshot),
+        "user_id": user.id,
+    }
+
+
+@app.get("/metrics/error-analysis")
+def get_error_analysis(user: AuthenticatedUser = Depends(get_current_user)) -> Dict[str, Any]:
+    """
+    GET /metrics/error-analysis
+    
+    Returns comprehensive error analysis and improvement suggestions.
+    
+    Response includes:
+    - Error distribution (FP and FN counts)
+    - Top domains with errors
+    - Missed attack types
+    - Most common false positive indicators
+    - Actionable improvement suggestions
+    
+    Example response:
+    {
+        "error_distribution": {
+            "false_positives": 20,
+            "false_negatives": 30,
+            "total_errors": 50,
+            "error_rate": 0.064
+        },
+        "top_error_domains": [
+            ["github.com", 5],
+            ["example.com", 4]
+        ],
+        "missed_attack_types": [
+            ["Prompt Injection", 12],
+            ["Phishing", 8]
+        ],
+        "top_false_positive_indicators": [
+            ["phishing_content_pattern", 7],
+            ["suspicious_keyword", 5]
+        ],
+        "improvement_suggestions": [
+            "Phishing patterns account for 40%+ FPs...",
+            "50%+ FNs are injection attacks..."
+        ]
+    }
+    """
+    tracker = get_tracker()
+    analysis = tracker.get_error_analysis()
+    
+    return {
+        **analysis,
+        "user_id": user.id,
+    }
+
+
+@app.get("/errors")
+def get_misclassifications(
+    error_type: str | None = None,
+    domain: str | None = None,
+    tag: str | None = None,
+    limit: int = 100,
+    user: AuthenticatedUser = Depends(get_current_user),
+) -> Dict[str, Any]:
+    """
+    GET /errors
+    
+    Returns all misclassifications (False Positives and False Negatives).
+    
+    Query parameters:
+    - error_type: "FP" for false positives, "FN" for false negatives, or null for all
+    - domain: Filter by domain substring
+    - tag: Filter by tag (phishing, injection, obfuscation, trusted_domain)
+    - limit: Maximum records to return (default: 100)
+    
+    Example request:
+    GET /errors?error_type=FP&domain=github&limit=50
+    
+    Example response:
+    {
+        "timestamp": "2026-03-20T10:30:00+00:00",
+        "error_type": "FP",
+        "domain_filter": "github",
+        "total_returned": 3,
+        "errors": [
+            {
+                "id": "err_000001",
+                "timestamp": "2026-03-20T10:15:00+00:00",
+                "url": "https://github-mirror-site.com/login",
+                "predicted_label": "malicious",
+                "actual_label": "benign",
+                "risk_score": 75,
+                "confidence": 0.92,
+                "attack_type": "Phishing",
+                "indicators": ["phishing_content_pattern", "credential_harvest_form"],
+                "reason": "Incorrectly flagged as Phishing. Indicators: phishing_content_pattern, credential_harvest_form",
+                "domain": "github-mirror-site.com",
+                "tags": ["phishing"]
+            }
+        ]
+    }
+    """
+    tracker = get_tracker()
+    errors = tracker.get_misclassifications(
+        error_type=error_type,
+        domain=domain,
+        tag=tag,
+        limit=limit,
+    )
+    
+    from dataclasses import asdict
+    
+    return {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "error_type": error_type or "all",
+        "domain_filter": domain,
+        "tag_filter": tag,
+        "total_returned": len(errors),
+        "errors": [asdict(e) for e in errors],
+        "user_id": user.id,
+    }
+
+
+@app.post("/metrics/reset")
+def reset_metrics(user: AuthenticatedUser = Depends(require_roles("admin"))) -> Dict[str, str]:
+    """
+    POST /metrics/reset
+    
+    Admin-only endpoint to reset all metrics to zero.
+    
+    Requires: Admin role
+    
+    Example response:
+    {
+        "status": "success",
+        "message": "All metrics reset to zero",
+        "timestamp": "2026-03-20T10:30:00+00:00"
+    }
+    """
+    tracker = get_tracker()
+    tracker.reset_metrics()
+    
+    return {
+        "status": "success",
+        "message": "All metrics reset to zero",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+@app.get("/metrics/export")
+def export_metrics(user: AuthenticatedUser = Depends(require_roles("admin"))) -> Dict[str, Any]:
+    """
+    GET /metrics/export
+    
+    Admin-only endpoint to export all metrics to JSON format.
+    
+    Requires: Admin role
+    
+    Returns full metrics with history and misclassifications.
+    """
+    tracker = get_tracker()
+    metrics = tracker.compute_metrics()
+    snapshot = tracker.get_metrics_snapshot()
+    analysis = tracker.get_error_analysis()
+    
+    from dataclasses import asdict
+    
+    return {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "metrics": metrics,
+        "snapshot": asdict(snapshot),
+        "error_analysis": analysis,
+        "history_snapshots": [asdict(s) for s in tracker.history[-10:]],  # Last 10
+        "misclassification_count": len(tracker.misclassifications),
+        "user_id": user.id,
+    }
