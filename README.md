@@ -135,6 +135,8 @@ The extension:
 - stores the SecureAgent JWT in `chrome.storage.local`
 - sends `Authorization: Bearer ...` to backend scan/action endpoints
 - syncs its token from the dashboard login flow
+- re-syncs auth from an open dashboard tab before clearing stale credentials
+- avoids failing open into misleading simulator errors when auth refresh is possible
 
 ### Role-Based Access Control
 
@@ -418,12 +420,14 @@ Folder: `secureagent-extension/`
 
 Behavior:
 - scans navigation through the backend
-- redirects `WARN` / `BLOCK` page results to the extension warning flow
+- surfaces `WARN` / `BLOCK` results in-page with the SecureAgent decision overlay
 - intercepts clicks, text entry, and form submissions
 - sends actions to `/evaluate_action`
 - includes the JWT in all protected backend requests
 - blocks risky agent actions before execution
 - reuses the dashboard-selected backend base URL instead of assuming a single hardcoded host
+- ignores stale late-arriving scan results that no longer match the active tab URL
+- no longer shows noisy “safe site” banners for normal allowed pages
 
 Token flow:
 - dashboard login stores JWT in local storage
@@ -431,6 +435,7 @@ Token flow:
 - content script stores the token in `chrome.storage.local`
 - background/content scripts reuse the token for scans and action mediation
 - the frontend also persists `secureagent_api_base_url`, which the extension reads for backend calls
+- when a request receives `401`, the extension attempts one dashboard-token re-sync before treating the session as expired
 
 ---
 
@@ -601,10 +606,17 @@ For judging and final submission, include:
   - confirm backend `/scans/my` and `/action_history` are returning `200`
   - create the Firestore composite indexes for production
   - verify `VITE_API_BASE_URL` points at the running backend
+  - if one auxiliary endpoint returns `401`, refresh the dashboard once instead of assuming the whole session is invalid
 
 - Google login fails with `auth/configuration-not-found`:
   - enable Google sign-in in Firebase Authentication
   - add `localhost` to Authorized Domains
+
+- Email/password login fails for a Google-created account:
+  - sign in with Google first
+  - open the profile menu in the dashboard
+  - use the password-enable flow to set a password for that existing account
+  - then use the same email with normal email/password login
 
 - Scan requests fail for `localhost`, Docker, or private IPs:
   - this is blocked by default to reduce SSRF exposure
@@ -617,6 +629,11 @@ For judging and final submission, include:
 - Extension changes do not appear:
   - reload the unpacked extension in `chrome://extensions`
   - make sure Chrome is loading `/Users/mac/Desktop/Secure-Agent-Browser/secureagent-extension`
+
+- Malicious-page simulator shows `SecureAgent requires login`:
+  - keep the dashboard open in a logged-in tab
+  - reload the extension after auth-related changes
+  - refresh the malicious page so the extension can re-sync the JWT from the dashboard tab
 
 ---
 
