@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { collection, onSnapshot, orderBy, query, where } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useAuth } from "@/context/AuthContext";
+import { type DateLike } from "@/lib/date";
 
 /* ---------------------------------- */
 /* Types */
@@ -20,10 +21,10 @@ export type PolicyDecision = {
 export type Scan = {
   id: string;
   url: string;
-  timestamp: any;
+  timestamp: DateLike;
   risk: number;
   status: "safe" | "warning" | "blocked";
-  details: any;
+  details: Record<string, unknown>;
 
   agent_action?: {
     type: string;

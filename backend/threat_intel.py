@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from time import time
 from typing import Any, Dict, Optional
 
@@ -11,6 +12,13 @@ PHISHTANK_FEED_URL = "https://data.phishtank.com/data/online-valid.csv"
 TIMEOUT = 6
 FEED_CACHE_TTL_SECONDS = 600
 _FEED_CACHE: Dict[str, Dict[str, Any]] = {}
+
+
+def _truthy_env(name: str, default: bool) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _check_urlhaus(url: str) -> Optional[Dict[str, Any]]:
@@ -77,7 +85,14 @@ def check_threat_intel(url: str) -> Optional[Dict[str, Any]]:
     Returns a threat dict when a match is found, else None.
     """
     target = (url or "").strip()
-    if not target or target.startswith("/attacks/"):
+    if not _truthy_env("SECUREAGENT_ENABLE_THREAT_INTEL", True):
+        return None
+    if (
+        not target
+        or target.startswith("/malicious-simulator-lab/pages/")
+        or target.startswith("/benchmark-fixtures/pages/")
+        or "://" not in target
+    ):
         return None
 
     return (

@@ -1,105 +1,79 @@
 import { motion } from "framer-motion";
-import { Shield, Eye, Brain, AlertTriangle, Lock, CheckCircle } from "lucide-react";
+import { Brain, Eye, Globe, Shield, Workflow, MousePointerClick } from "lucide-react";
 
 const steps = [
   {
     icon: Globe,
-    title: "Page Loaded",
-    desc: "Automated secure browser loads the target URL in a sandboxed environment via Selenium.",
+    title: "1. Page Context Collection",
+    desc: "The extension and scanner capture URL, DOM/UI context, visible text, and target page metadata.",
   },
   {
     icon: Eye,
-    title: "DOM Monitoring",
-    desc: "Live DOM changes are tracked over time to catch delayed injections and dynamic threats.",
+    title: "2. Signal Extraction",
+    desc: "Domain intelligence, UI deception checks, obfuscation analysis, and prompt-injection heuristics generate signals.",
   },
   {
     icon: Brain,
-    title: "Multi-Layer Analysis",
-    desc: "Content analyzed for prompt injection, phishing forms, clickjacking, and suspicious intent.",
+    title: "3. Risk Computation",
+    desc: "ML scoring, semantic reasoning, trust signals, and threat intelligence combine into a weighted risk score.",
   },
   {
-    icon: AlertTriangle,
-    title: "Risk Scoring",
-    desc: "Hybrid ML + LLM reasoning produces a risk score from 0–100 with full explainability.",
+    icon: Workflow,
+    title: "4. Policy Decision",
+    desc: "The policy engine converts that score into Allow, Warn, Block, or confirmation-gated action flow.",
+  },
+  {
+    icon: MousePointerClick,
+    title: "5. Action Mediation",
+    desc: "If the agent wants to click, type, or navigate, the action mediator revalidates the step against user intent.",
   },
   {
     icon: Shield,
-    title: "Decision Enforcement",
-    desc: "System enforces Allow, Warn, or Block — replacing malicious pages with a security notice.",
+    title: "6. Audit + Replay",
+    desc: "Scans, reasons, actions, and timings are persisted for dashboard review and incident analysis.",
   },
 ];
 
-import { Globe } from "lucide-react";
-
 const HowItWorks = () => {
   return (
-    <section id="how-it-works" className="py-24 relative">
+    <section id="how-it-works" className="py-24">
       <div className="container mx-auto px-6">
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           whileInView={{ opacity: 1, y: 0 }}
           viewport={{ once: true }}
-          className="text-center mb-16"
+          className="mb-16 text-center"
         >
-          <span className="font-mono text-sm text-primary mb-4 block">// SYSTEM FLOW</span>
-          <h2 className="text-3xl md:text-4xl font-bold mb-4">How It Works</h2>
-          <p className="text-muted-foreground max-w-2xl mx-auto">
-            A five-stage pipeline that intercepts, analyzes, and acts on web threats before they reach the user.
+          <span className="mb-4 block font-mono text-sm uppercase tracking-[0.22em] text-primary/80">Execution Flow</span>
+          <h2 className="text-3xl font-bold md:text-4xl">How The Runtime Actually Works</h2>
+          <p className="mx-auto mt-4 max-w-3xl text-muted-foreground">
+            This is the real processing path used by the system: collect context, score risk,
+            enforce policy, mediate actions, and persist evidence.
           </p>
         </motion.div>
 
-        <div className="relative max-w-3xl mx-auto">
-          {/* Vertical line */}
-          <div className="absolute left-8 top-0 bottom-0 w-px bg-gradient-to-b from-primary/0 via-primary/40 to-primary/0 hidden md:block" />
-
-          <div className="space-y-8">
-            {steps.map((step, i) => (
-              <motion.div
-                key={step.title}
-                initial={{ opacity: 0, x: -30 }}
-                whileInView={{ opacity: 1, x: 0 }}
-                viewport={{ once: true }}
-                transition={{ delay: i * 0.1 }}
-                className="flex gap-6 items-start"
-              >
-                <div className="relative z-10 shrink-0 w-16 h-16 rounded-xl glass flex items-center justify-center border-primary/30">
-                  <step.icon className="w-6 h-6 text-primary" />
-                  <span className="absolute -top-2 -right-2 w-6 h-6 rounded-full bg-primary text-primary-foreground text-xs font-mono font-bold flex items-center justify-center">
-                    {i + 1}
-                  </span>
+        <div className="grid gap-4 lg:grid-cols-2">
+          {steps.map((step, index) => (
+            <motion.div
+              key={step.title}
+              initial={{ opacity: 0, y: 20 }}
+              whileInView={{ opacity: 1, y: 0 }}
+              viewport={{ once: true }}
+              transition={{ delay: index * 0.06 }}
+              className="glass rounded-[24px] border border-border/80 p-6"
+            >
+              <div className="flex items-start gap-4">
+                <div className="rounded-2xl border border-primary/30 bg-primary/10 p-3">
+                  <step.icon className="h-5 w-5 text-primary" />
                 </div>
-                <div className="glass rounded-xl p-6 flex-1">
-                  <h3 className="font-semibold text-lg mb-1">{step.title}</h3>
-                  <p className="text-sm text-muted-foreground">{step.desc}</p>
+                <div>
+                  <h3 className="text-lg font-semibold">{step.title}</h3>
+                  <p className="mt-2 text-sm leading-7 text-muted-foreground">{step.desc}</p>
                 </div>
-              </motion.div>
-            ))}
-          </div>
+              </div>
+            </motion.div>
+          ))}
         </div>
-
-        {/* Decision outcomes */}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          whileInView={{ opacity: 1, y: 0 }}
-          viewport={{ once: true }}
-          className="mt-16 grid grid-cols-1 md:grid-cols-3 gap-4 max-w-3xl mx-auto"
-        >
-          <div className="glass rounded-xl p-5 border-cyber-safe/30 text-center">
-            <CheckCircle className="w-8 h-8 text-cyber-safe mx-auto mb-2" />
-            <h4 className="font-semibold text-cyber-safe">Allow</h4>
-            <p className="text-xs text-muted-foreground mt-1">Score &lt; 30 — Safe to access</p>
-          </div>
-          <div className="glass rounded-xl p-5 border-cyber-warning/30 text-center">
-            <AlertTriangle className="w-8 h-8 text-cyber-warning mx-auto mb-2" />
-            <h4 className="font-semibold text-cyber-warning">Warn</h4>
-            <p className="text-xs text-muted-foreground mt-1">Score 30–70 — User confirmation</p>
-          </div>
-          <div className="glass rounded-xl p-5 border-cyber-danger/30 text-center">
-            <Lock className="w-8 h-8 text-cyber-danger mx-auto mb-2" />
-            <h4 className="font-semibold text-cyber-danger">Block</h4>
-            <p className="text-xs text-muted-foreground mt-1">Score &gt; 70 — Access denied</p>
-          </div>
-        </motion.div>
       </div>
     </section>
   );

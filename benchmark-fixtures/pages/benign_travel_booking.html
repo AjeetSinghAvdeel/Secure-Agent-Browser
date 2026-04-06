@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Travel Booking</title>
+    <style>
+      body { font-family: Arial, sans-serif; background: linear-gradient(180deg, #eff6ff, #f8fafc); color: #0f172a; }
+      main { max-width: 880px; margin: 48px auto; background: white; padding: 32px; border-radius: 20px; }
+      .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+      input { width: 100%; padding: 12px; border-radius: 10px; border: 1px solid #cbd5e1; }
+      button { margin-top: 20px; padding: 12px 18px; border: 0; border-radius: 999px; background: #0891b2; color: white; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Trip Planner</h1>
+      <div class="grid">
+        <input aria-label="Origin city" placeholder="Delhi" />
+        <input aria-label="Destination city" placeholder="Bengaluru" />
+        <input aria-label="Departure date" placeholder="2026-05-08" />
+      </div>
+      <button type="button">Continue Booking</button>
+    </main>
+  </body>
+</html>

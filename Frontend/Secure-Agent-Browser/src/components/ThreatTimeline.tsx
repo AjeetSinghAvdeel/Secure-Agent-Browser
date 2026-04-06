@@ -9,6 +9,7 @@ import {
   ResponsiveContainer,
 } from 'recharts';
 import { Card } from '@/components/ui/card';
+import { toDateValue, type DateLike } from '@/lib/date';
 
 interface ScanRecord {
   id?: string;
@@ -19,7 +20,7 @@ interface ScanRecord {
   policy?: {
     decision?: string;
   };
-  timestamp?: any; // Firestore timestamp or Date or string
+  timestamp?: DateLike;
   time?: string; // alternative simple string field
 }
 
@@ -43,8 +44,8 @@ const ThreatTimeline: React.FC<ThreatTimelineProps> = ({ scans }) => {
       if (!isBlocked) return;
 
       const rawTime = scan.time ?? scan.timestamp;
-      const date = rawTime?.toDate ? rawTime.toDate() : new Date(rawTime);
-      if (Number.isNaN(date.getTime())) return;
+      const date = toDateValue(rawTime);
+      if (!date) return;
 
       // Normalize to minute buckets using epoch ms to keep chronological sorting correct.
       const minuteBucket = Math.floor(date.getTime() / 60000) * 60000;
@@ -58,9 +59,20 @@ const ThreatTimeline: React.FC<ThreatTimelineProps> = ({ scans }) => {
     return Object.entries(grouped)
       .sort(([a], [b]) => Number(a) - Number(b))
       .map(([bucketMs, count]) => ({
-        time: new Date(Number(bucketMs)).toLocaleTimeString([], {
+        time: new Date(Number(bucketMs)).toLocaleString([], {
+          day: '2-digit',
+          month: '2-digit',
           hour: '2-digit',
           minute: '2-digit',
+          hour12: false,
+        }),
+        fullTime: new Date(Number(bucketMs)).toLocaleString([], {
+          day: '2-digit',
+          month: 'long',
+          year: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit',
+          second: '2-digit',
           hour12: false,
         }),
         attacks: count,
@@ -77,6 +89,10 @@ const ThreatTimeline: React.FC<ThreatTimelineProps> = ({ scans }) => {
             <XAxis dataKey="time" stroke="#9ca3af" />
             <YAxis stroke="#9ca3af" allowDecimals={false} />
             <Tooltip
+              labelFormatter={(_, payload) => {
+                const point = payload?.[0]?.payload as { fullTime?: string } | undefined;
+                return point?.fullTime || '';
+              }}
               contentStyle={{ backgroundColor: '#1f2937', border: 'none', color: '#fff' }}
             />
             <Line type="monotone" dataKey="attacks" stroke="#3b82f6" strokeWidth={2} dot={{ r: 2 }} />

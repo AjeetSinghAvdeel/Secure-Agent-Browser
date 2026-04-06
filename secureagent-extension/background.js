@@ -1,9 +1,10 @@
-const API_URL = "http://localhost:8000/scan";
+const DEFAULT_API_BASE_URL = "http://127.0.0.1:8000";
 const BYPASS_TTL_MS = 2 * 60 * 1000;
 const SAFE_NOTIFY_TTL_MS = 15000;
 const AUTH_NOTIFY_TTL_MS = 15000;
 
 const pendingByTab = new Map();
+const pendingScanIdByTab = new Map();
 const bypassByTab = new Map();
 const safeNotifyCache = new Map();
 const pendingResultByTab = new Map();
@@ -24,6 +25,7 @@ function isLocalDashboardUrl(url) {
 function shouldSkip(url) {
   return (
     !url ||
+    isLocalDashboardUrl(url) ||
     url.startsWith("chrome://") ||
     url.startsWith("chrome-extension://") ||
     url.startsWith("edge://") ||
@@ -78,6 +80,46 @@ function clearStoredToken() {
   });
 }
 
+function normalizeApiBaseUrl(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return DEFAULT_API_BASE_URL;
+  return raw.replace(/\/+$/, "");
+}
+
+async function getApiBaseUrl() {
+  const storedBaseUrl = await new Promise((resolve) => {
+    chrome.storage.local.get(["apiBaseUrl"], (result) => {
+      resolve(result?.apiBaseUrl || null);
+    });
+  });
+  if (storedBaseUrl) {
+    return normalizeApiBaseUrl(storedBaseUrl);
+  }
+
+  const tabs = await chrome.tabs.query({});
+  const dashboardTabs = tabs.filter((tab) => tab.id && isLocalDashboardUrl(tab.url || ""));
+  for (const tab of dashboardTabs) {
+    try {
+      const results = await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        func: () => window.localStorage.getItem("secureagent_api_base_url"),
+      });
+      const discoveredBaseUrl = results?.[0]?.result;
+      if (discoveredBaseUrl) {
+        const normalized = normalizeApiBaseUrl(discoveredBaseUrl);
+        await new Promise((resolve) => {
+          chrome.storage.local.set({ apiBaseUrl: normalized }, () => resolve());
+        });
+        return normalized;
+      }
+    } catch (_) {
+      // ignore tabs where script injection is not available
+    }
+  }
+
+  return DEFAULT_API_BASE_URL;
+}
+
 async function syncTokenFromDashboardTabs() {
   const tabs = await chrome.tabs.query({});
   const dashboardTabs = tabs.filter((tab) => tab.id && isLocalDashboardUrl(tab.url || ""));
@@ -117,27 +159,58 @@ function notifyAuthRequired() {
   }
 }
 
-async function analyzeUrl(url) {
+async function collectPageContext(tabId) {
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    try {
+      const response = await chrome.tabs.sendMessage(tabId, {
+        type: "SECUREAGENT_COLLECT_PAGE_CONTEXT",
+      });
+      if (response?.pageContext) {
+        return response.pageContext;
+      }
+    } catch (_) {
+      // content script may not be ready on the first pass
+    }
+    await new Promise((resolve) => setTimeout(resolve, 150));
+  }
+  return null;
+}
+
+async function analyzeUrl(url, tabId) {
   let token = await getStoredToken();
   if (!token) {
     token = await syncTokenFromDashboardTabs();
   }
   if (!token) {
-    notifyAuthRequired();
     return null;
   }
 
-  const res = await fetch(API_URL, {
+  const apiBaseUrl = await getApiBaseUrl();
+  const pageContext = typeof tabId === "number" ? await collectPageContext(tabId) : null;
+  let res = await fetch(`${apiBaseUrl}/scan`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${token}`,
     },
-    body: JSON.stringify({ url }),
+    body: JSON.stringify({ url, page_context: pageContext }),
   });
   if (res.status === 401) {
+    const refreshedToken = await syncTokenFromDashboardTabs();
+    if (refreshedToken && refreshedToken !== token) {
+      token = refreshedToken;
+      res = await fetch(`${apiBaseUrl}/scan`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ url, page_context: pageContext }),
+      });
+    }
+  }
+  if (res.status === 401) {
     await clearStoredToken();
-    notifyAuthRequired();
     throw new Error("SecureAgent requires login");
   }
   if (!res.ok) {
@@ -146,12 +219,66 @@ async function analyzeUrl(url) {
   return res.json();
 }
 
+async function callAuthenticatedApi(url, payload) {
+  let token = await getStoredToken();
+  if (!token) {
+    token = await syncTokenFromDashboardTabs();
+  }
+  if (!token) {
+    throw new Error("SecureAgent requires login");
+  }
+
+  let res = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify(payload || {}),
+  });
+
+  if (res.status === 401) {
+    const refreshedToken = await syncTokenFromDashboardTabs();
+    if (refreshedToken && refreshedToken !== token) {
+      token = refreshedToken;
+      res = await fetch(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(payload || {}),
+      });
+    }
+  }
+
+  if (res.status === 401) {
+    await clearStoredToken();
+    throw new Error("SecureAgent requires login");
+  }
+
+  if (!res.ok) {
+    let detail = "";
+    try {
+      const data = await res.json();
+      detail = data?.detail ? `: ${data.detail}` : "";
+    } catch (_) {
+      // ignore parse failures
+    }
+    throw new Error(`SecureAgent API error: ${res.status}${detail}`);
+  }
+
+  return res.json();
+}
+
 chrome.runtime.onStartup?.addListener(() => {
   void syncTokenFromDashboardTabs();
+  void getApiBaseUrl();
 });
 
 chrome.runtime.onInstalled?.addListener(() => {
   void syncTokenFromDashboardTabs();
+  void getApiBaseUrl();
 });
 
 function toWarningUrl(result, url, mode) {
@@ -197,6 +324,11 @@ function sendResultToTab(tabId, result) {
     type: "SECUREAGENT_RESULT",
     decision: String(result?.decision || "WARN").toUpperCase(),
     risk: Number(result?.risk ?? 0),
+    url: String(result?.url || ""),
+    explanation: String(result?.explanation || ""),
+    attack_type: String(result?.attack_type || ""),
+    indicators: Array.isArray(result?.indicators) ? result.indicators : [],
+    reason: String(result?.reason || ""),
   };
 
   pendingResultByTab.set(tabId, payload);
@@ -221,37 +353,32 @@ function scheduleScan(details) {
     return;
   }
 
+  const scanId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   pendingByTab.set(tabId, url);
+  pendingScanIdByTab.set(tabId, scanId);
 
   (async () => {
     try {
-      const result = await analyzeUrl(url);
+      const result = await analyzeUrl(url, tabId);
       if (!result) {
         return;
       }
-      const decision = String(result?.decision || "WARN").toUpperCase();
-
-      if (decision === "BLOCK" || decision === "WARN") {
-        const warningPage = toWarningUrl(
-          result,
-          url,
-          decision === "BLOCK" ? "block" : "warn"
-        );
-        await chrome.tabs.update(tabId, { url: warningPage });
+      if (pendingScanIdByTab.get(tabId) !== scanId) {
         return;
       }
-
-      if (decision === "ALLOW") {
-        sendResultToTab(tabId, result);
-        maybeNotifySafe(url, result?.risk);
+      const tab = await chrome.tabs.get(tabId).catch(() => null);
+      if (!tab?.id || String(tab.url || "") !== String(url || "")) {
+        return;
       }
-
-      // SAFE: no redirect needed.
+      sendResultToTab(tabId, result);
     } catch (error) {
       console.error("SecureAgent scan failed", error);
       // Fail-open for normal navigation when scanner is unavailable.
     } finally {
-      pendingByTab.delete(tabId);
+      if (pendingScanIdByTab.get(tabId) === scanId) {
+        pendingByTab.delete(tabId);
+        pendingScanIdByTab.delete(tabId);
+      }
     }
   })();
 }
@@ -317,6 +444,37 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return true;
     }
     sendResponse({ ok: false });
+    return true;
+  }
+
+  if (message?.type === "SECUREAGENT_EVALUATE_ACTION") {
+    getApiBaseUrl()
+      .then((apiBaseUrl) => callAuthenticatedApi(`${apiBaseUrl}/evaluate_action`, message.payload))
+      .then((data) => sendResponse({ ok: true, data }))
+      .catch((error) => sendResponse({ ok: false, error: String(error?.message || error) }));
+    return true;
+  }
+
+  if (message?.type === "SECUREAGENT_REQUEST_PLAN") {
+    getApiBaseUrl()
+      .then((apiBaseUrl) => callAuthenticatedApi(`${apiBaseUrl}/agent/plan`, message.payload))
+      .then((data) => sendResponse({ ok: true, data }))
+      .catch((error) => sendResponse({ ok: false, error: String(error?.message || error) }));
+    return true;
+  }
+
+  if (message?.type === "SECUREAGENT_LOG_CONFIRMATION") {
+    getApiBaseUrl()
+      .then((apiBaseUrl) => callAuthenticatedApi(`${apiBaseUrl}/action_confirmation`, message.payload))
+      .then((data) => sendResponse({ ok: true, data }))
+      .catch((error) => sendResponse({ ok: false, error: String(error?.message || error) }));
+    return true;
+  }
+
+  if (message?.type === "SECUREAGENT_SYNC_AUTH") {
+    syncTokenFromDashboardTabs()
+      .then((token) => sendResponse({ ok: true, data: { tokenPresent: Boolean(token) } }))
+      .catch((error) => sendResponse({ ok: false, error: String(error?.message || error) }));
     return true;
   }
 

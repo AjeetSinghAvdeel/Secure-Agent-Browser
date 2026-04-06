@@ -124,4 +124,30 @@
   .font-mono {
     font-family: 'JetBrains Mono', monospace;
   }
+
+  .dashboard-scroll-list {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--border)) transparent;
+  }
+
+  .dashboard-scroll-list::-webkit-scrollbar {
+    width: 8px;
+  }
+
+  .dashboard-scroll-list::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .dashboard-scroll-list::-webkit-scrollbar-thumb {
+    background: hsl(var(--border) / 0.9);
+    border-radius: 9999px;
+  }
+
+  .dashboard-list-fade-top {
+    background: linear-gradient(180deg, hsl(var(--cyber-glass) / 0.96), transparent);
+  }
+
+  .dashboard-list-fade-bottom {
+    background: linear-gradient(0deg, hsl(var(--cyber-glass) / 0.98), transparent);
+  }
 }

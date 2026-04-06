@@ -9,7 +9,7 @@ import yaml
 
 DEFAULT_POLICY_MODE = "balanced"
 POLICY_DIR = Path(__file__).resolve().parent / "policies"
-ALLOWED_DECISIONS = ("ALLOW", "WARN", "BLOCK")
+ALLOWED_DECISIONS = ("ALLOW", "WARN", "REQUIRE_CONFIRMATION", "BLOCK")
 
 
 def _clamp01(value: float) -> float:
@@ -64,6 +64,12 @@ def load_policy(policy_mode: str = DEFAULT_POLICY_MODE) -> Dict[str, float]:
 def evaluate_risk_policy(
     risk_score: float,
     policy_mode: str = DEFAULT_POLICY_MODE,
+    *,
+    signal_details: list[Dict[str, Any]] | None = None,
+    attack_type: str = "",
+    is_local_simulation: bool = False,
+    is_trusted_domain: bool = False,
+    has_threat_intel: bool = False,
 ) -> Dict[str, str]:
     """
     Evaluate risk score against a selected policy.
@@ -78,8 +84,41 @@ def evaluate_risk_policy(
     risk = _normalize_risk(risk_score)
     mode = (policy_mode or DEFAULT_POLICY_MODE).strip().lower()
     risk_percent = int(round(risk * 100))
-    warn_threshold = 40
-    block_threshold = 70
+    policy = load_policy(mode)
+    warn_threshold = int(round(policy["warn_if_risk_above"] * 100))
+    block_threshold = int(round(policy["block_if_risk_above"] * 100))
+    details = list(signal_details or [])
+    high_or_critical = [
+        signal
+        for signal in details
+        if str(signal.get("severity", "")).lower() in {"high", "critical"}
+    ]
+    critical = [
+        signal
+        for signal in details
+        if str(signal.get("severity", "")).lower() == "critical"
+    ]
+    attack = str(attack_type or "").strip().lower()
+
+    elevated_ui_attack = attack in {"clickjacking", "dynamic script attack"} and len(high_or_critical) >= 2
+
+    if critical or (
+        elevated_ui_attack and (not is_trusted_domain or has_threat_intel or risk_percent >= warn_threshold)
+    ):
+        return {
+            "decision": "BLOCK" if risk_percent >= max(55, warn_threshold) else "WARN",
+            "policy_mode": mode,
+            "reason": (
+                "High-severity attack signals override the base threshold evaluation."
+            ),
+        }
+
+    if is_local_simulation and len(high_or_critical) >= 2 and risk_percent >= max(30, warn_threshold - 10):
+        return {
+            "decision": "WARN",
+            "policy_mode": mode,
+            "reason": "Local simulator page contains multiple high-severity attack indicators.",
+        }
 
     if risk_percent >= block_threshold:
         decision = "BLOCK"
@@ -104,6 +143,47 @@ def evaluate_risk_policy(
         "decision": decision,
         "policy_mode": mode,
         "reason": reason,
+    }
+
+
+def evaluate_action_policy(
+    *,
+    risk_score: float,
+    action: str,
+    input_type: str = "",
+    target_text: str = "",
+) -> Dict[str, str]:
+    risk = _normalize_risk(risk_score)
+    risk_percent = int(round(risk * 100))
+    action_name = str(action or "").strip().lower()
+    input_kind = str(input_type or "").strip().lower()
+    label = f"{target_text} {input_kind}".lower()
+    sensitive = input_kind in {"password", "email"} or any(
+        token in label for token in ("password", "otp", "verify", "code", "token")
+    )
+    high_risk_action = action_name in {"submit_form", "enter_text", "type"} and risk_percent >= 55
+
+    if risk_percent >= 80:
+        return {
+            "decision": "BLOCK",
+            "reason": f"Action blocked because risk score {risk_percent} exceeds 80.",
+        }
+
+    if sensitive or high_risk_action:
+        return {
+            "decision": "REQUIRE_CONFIRMATION",
+            "reason": "Sensitive or high-risk action requires explicit user confirmation.",
+        }
+
+    if risk_percent >= 50:
+        return {
+            "decision": "WARN",
+            "reason": f"Action is elevated risk because score {risk_percent} exceeds 50.",
+        }
+
+    return {
+        "decision": "ALLOW",
+        "reason": "Action is within acceptable policy limits.",
     }
 
 

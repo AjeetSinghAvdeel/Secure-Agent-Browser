@@ -7,10 +7,24 @@ from typing import Dict, List
 from urllib.parse import urlparse
 
 import tldextract
-from domain_intelligence import calculate_domain_trust
+try:
+    from domain_intelligence import calculate_domain_trust
+except Exception:  # pragma: no cover - package import fallback
+    from .domain_intelligence import calculate_domain_trust  # type: ignore
 
 SUSPICIOUS_TLDS = {"xyz", "top", "click", "ru", "tk"}
 PHISHING_KEYWORDS = {"login", "verify", "secure", "update", "account", "password"}
+TRUSTED_DOMAIN_SUFFIXES = {
+    "google.com",
+    "github.com",
+    "linkedin.com",
+    "microsoft.com",
+    "apple.com",
+    "cloudflare.com",
+    "amazon.com",
+    "wikipedia.org",
+    "openai.com",
+}
 IP_ADDRESS_PATTERN = re.compile(r"^(?:\d{1,3}\.){3}\d{1,3}$")
 
 
@@ -40,12 +54,30 @@ def analyze_url(url: str) -> Dict[str, object]:
     flags: List[str] = []
     lowered_url = url.lower()
     host = _extract_host(url)
-    extracted = tldextract.extract(host)
+    parsed = urlparse(url if "://" in url else f"http://{url}")
+    path_and_query = f"{parsed.path} {parsed.query}".lower()
+    is_trusted_host = any(host == suffix or host.endswith(f".{suffix}") for suffix in TRUSTED_DOMAIN_SUFFIXES)
+
+    if not host:
+        return {
+            "trust_score": 50,
+            "risk_penalty": 0.5,
+            "flags": ["path_only_target"],
+        }
+
+    _ = tldextract.extract(host)
 
     if any(host.endswith(f".{tld}") or host == tld for tld in SUSPICIOUS_TLDS):
         flags.append("suspicious_tld")
 
-    if any(keyword in lowered_url for keyword in PHISHING_KEYWORDS):
+    phishing_keyword_hit = any(keyword in lowered_url for keyword in PHISHING_KEYWORDS)
+    trusted_host_only_path_hit = (
+        is_trusted_host
+        and phishing_keyword_hit
+        and not any(keyword in host for keyword in PHISHING_KEYWORDS)
+        and any(keyword in path_and_query for keyword in PHISHING_KEYWORDS)
+    )
+    if phishing_keyword_hit and not trusted_host_only_path_hit:
         flags.append("phishing_keyword")
 
     if _is_ip_address(host):

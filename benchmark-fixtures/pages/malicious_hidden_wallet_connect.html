@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Hidden Wallet Overlay</title>
+    <style>
+      body { font-family: Arial, sans-serif; background: #0f172a; color: white; }
+      .article { max-width: 760px; margin: 40px auto; padding: 24px; background: #111827; border-radius: 18px; }
+      .overlay {
+        position: fixed;
+        inset: 0;
+        opacity: 0.02;
+        z-index: 9999;
+        background: white;
+      }
+      .overlay button {
+        position: absolute;
+        right: 80px;
+        bottom: 80px;
+        padding: 18px 22px;
+        border: 0;
+        border-radius: 999px;
+        background: #f59e0b;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="article">
+      <h1>Market Commentary</h1>
+      <p>This page looks like a normal article, but the top overlay is intended to hijack clicks.</p>
+    </div>
+    <div class="overlay">
+      <button type="button">Connect Wallet</button>
+    </div>
+  </body>
+</html>

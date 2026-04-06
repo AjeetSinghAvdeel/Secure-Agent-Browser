@@ -47,6 +47,8 @@ PHISHING_PHRASES = [
     "immediate verification required",
     "continue secure login",
     "password update",
+    "approve access immediately",
+    "approve access now",
 ]
 
 SENSITIVE_TERMS = [
@@ -75,6 +77,9 @@ IMPERATIVE_PATTERNS = [
     r"\bclick here to\b",
     r"\blogin now\b",
     r"\bcontinue verification\b",
+    r"\bapprove access\b",
+    r"\bexport data\b",
+    r"\bconnect wallet\b",
 ]
 
 
@@ -103,7 +108,7 @@ def detect_malicious_intent(text: str) -> Dict[str, Any]:
         score += min(0.45, 0.12 * len(phishing_hits))
         reasons.append("Urgent verification or account recovery language detected")
 
-    if len(sensitive_hits) >= 2:
+    if len(sensitive_hits) >= 2 and not (benign_hits and not prompt_hits and not phishing_hits and imperative_hits == 0):
         flags.append("credential_request")
         score += 0.18
         reasons.append("Sensitive credential fields are requested")
@@ -119,6 +124,18 @@ def detect_malicious_intent(text: str) -> Dict[str, Any]:
         flags.append("imperative_manipulation")
         score += min(0.20, 0.05 * imperative_hits)
         reasons.append("The page pressures the agent/user to perform actions")
+
+    if "approve access" in lowered and any(token in lowered for token in ("account data", "team permissions", "workspace active")):
+        if "phishing_intent" not in flags:
+            flags.append("phishing_intent")
+        score += 0.24
+        reasons.append("The page pushes high-impact consent or permission approval")
+
+    if "export all" in lowered and any(token in lowered for token in ("secret", "credential", "token")):
+        if "prompt_injection" not in flags:
+            flags.append("prompt_injection")
+        score += 0.24
+        reasons.append("The page attempts to redirect the agent toward sensitive data export")
 
     # Benign context can reduce generic suspicion but should not neutralize
     # explicit prompt injection or phishing markers.

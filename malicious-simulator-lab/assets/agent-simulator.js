@@ -1,8 +1,9 @@
 (function () {
   const scenario = window.secureAgentScenario || null;
-  if (!scenario || !Array.isArray(scenario.actions)) return;
+  if (!scenario || (!Array.isArray(scenario.actions) && !Array.isArray(scenario.goals))) return;
 
   const panel = document.createElement("aside");
+  panel.id = "secureagent-agent-simulator";
   panel.style.position = "fixed";
   panel.style.right = "18px";
   panel.style.bottom = "18px";
@@ -33,16 +34,44 @@
     <p style="margin:10px 0 14px;font-size:12px;line-height:1.5;color:#cbd5e1;">
       Trigger simulated agent actions. SecureAgent should approve safe actions and stop risky ones.
     </p>
+    <div id="secureagent-sim-goals" style="display:grid;gap:8px;margin-bottom:10px;"></div>
     <div id="secureagent-sim-actions" style="display:grid;gap:8px;"></div>
     <div id="secureagent-sim-status" style="margin-top:12px;padding:10px 12px;border-radius:12px;background:rgba(15,23,42,.7);font-size:12px;color:#cbd5e1;">
       Waiting for simulated agent action...
     </div>
   `;
 
+  const goalContainer = panel.querySelector("#secureagent-sim-goals");
   const actionContainer = panel.querySelector("#secureagent-sim-actions");
   const status = panel.querySelector("#secureagent-sim-status");
 
-  scenario.actions.forEach((action) => {
+  (scenario.goals || []).forEach((goal) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = String(goal.label || goal.goal);
+    button.style.width = "100%";
+    button.style.textAlign = "left";
+    button.style.padding = "10px 12px";
+    button.style.borderRadius = "12px";
+    button.style.border = "1px solid rgba(56,189,248,.24)";
+    button.style.background = "rgba(8,47,73,.92)";
+    button.style.color = "#e0f2fe";
+    button.style.fontWeight = "600";
+    button.style.cursor = "pointer";
+    button.addEventListener("click", () => {
+      status.textContent = `Planning protected goal: ${goal.goal}...`;
+      window.postMessage(
+        {
+          type: "SECUREAGENT_RUN_AGENT",
+          userGoal: goal.goal,
+        },
+        "*"
+      );
+    });
+    goalContainer.appendChild(button);
+  });
+
+  (scenario.actions || []).forEach((action) => {
     const button = document.createElement("button");
     button.type = "button";
     button.textContent = String(action.label || action.action);

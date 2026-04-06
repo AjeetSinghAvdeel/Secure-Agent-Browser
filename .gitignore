@@ -4,7 +4,14 @@ frontend/node_modules/
 # Backend
 backend/__pycache__/
 *.pyc
+backend/local_auth_users.json
 
 # Secrets
 firebase_key.json
 .env
+
+# Local OS / generated artifacts
+.DS_Store
+benchmark-results/latest/
+benchmark-results/*/
+!benchmark-results/README.md

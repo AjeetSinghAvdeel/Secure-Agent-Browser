@@ -3,6 +3,8 @@ import GaugeChart from 'react-gauge-component';
 import { CheckCircle, AlertTriangle, AlertCircle, TrendingUp, Shield } from 'lucide-react';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { ChartContainer, ChartTooltip, ChartTooltipContent } from '@/components/ui/chart';
+import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from 'recharts';
 
 interface RiskIndicator {
   name: string;
@@ -15,15 +17,42 @@ interface ExplanationData {
   summary: string;
   reasons?: string[];
   policyDecision?: string;
+  confidenceScore?: number;
+  reasoningSteps?: string[];
+  scoreBreakdown?: {
+    ml?: number;
+    domain?: number;
+    ui?: number;
+    obfuscation?: number;
+  };
 }
 
 interface RiskIntelligencePanelProps {
   riskScore: number; // 0-100
   trustScore: number; // 0-100
-  decision: 'ALLOW' | 'WARN' | 'BLOCK';
+  decision: 'ALLOW' | 'WARN' | 'BLOCK' | 'REQUIRE_CONFIRMATION';
   indicators: RiskIndicator[];
   explanation: ExplanationData;
 }
+
+const BREAKDOWN_KEYS = [
+  { key: 'ml', label: 'ML' },
+  { key: 'domain', label: 'Domain' },
+  { key: 'ui', label: 'UI' },
+  { key: 'obfuscation', label: 'Obfuscation' },
+] as const;
+
+const normalizeBreakdownValue = (value: unknown): number => {
+  const numeric = typeof value === 'number' ? value : Number(value ?? 0);
+  if (!Number.isFinite(numeric)) return 0;
+  return Math.max(0, Math.round(numeric));
+};
+
+const normalizeScoreBreakdown = (scoreBreakdown?: ExplanationData['scoreBreakdown']) =>
+  BREAKDOWN_KEYS.map(({ key, label }) => ({
+    name: label,
+    value: normalizeBreakdownValue(scoreBreakdown?.[key]),
+  }));
 
 /**
  * RiskIntelligencePanel Component
@@ -105,6 +134,14 @@ const RiskIntelligencePanel: React.FC<RiskIntelligencePanelProps> = ({
           icon: <AlertCircle className="w-6 h-6" />,
           description: 'Access blocked'
         };
+      case 'REQUIRE_CONFIRMATION':
+        return {
+          color: 'text-orange-300',
+          bgColor: 'bg-orange-500/15',
+          ring: 'border-orange-400/30',
+          icon: <AlertTriangle className="w-6 h-6" />,
+          description: 'Approval required before execution'
+        };
       default:
         return {
           color: 'text-muted-foreground',
@@ -119,6 +156,9 @@ const RiskIntelligencePanel: React.FC<RiskIntelligencePanelProps> = ({
   const decisionStyle = getDecisionStyle(decision);
   const trustColors = getTrustColor(trustScore);
   const detectedIndicators = indicators.filter(ind => ind.detected);
+  const breakdownData = normalizeScoreBreakdown(explanation.scoreBreakdown);
+  const hasBreakdownData = breakdownData.some((entry) => entry.value > 0);
+  const breakdownMax = Math.max(10, ...breakdownData.map((entry) => entry.value));
 
   const severityColors: { [key: string]: string } = {
     critical: 'bg-cyber-danger/20 text-red-200 border-cyber-danger/40',
@@ -295,6 +335,78 @@ const RiskIntelligencePanel: React.FC<RiskIntelligencePanelProps> = ({
                   {explanation.policyDecision || decision}
                 </p>
               </div>
+              {typeof explanation.confidenceScore === 'number' && (
+                <div className="mt-3">
+                  <p className="text-xs font-semibold text-primary uppercase">Confidence Score:</p>
+                  <p className="text-sm text-foreground mt-1 font-semibold">
+                    {(explanation.confidenceScore * 100).toFixed(1)}%
+                  </p>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-[0.9fr_1.1fr] gap-4">
+          <div className="rounded-lg border border-border bg-secondary/30 p-4">
+            <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">
+              Score Breakdown
+            </h4>
+            <div className="h-56">
+              {hasBreakdownData ? (
+                <ChartContainer
+                  config={{
+                    value: {
+                      label: 'Points',
+                      color: 'hsl(var(--primary))',
+                    },
+                  }}
+                >
+                  <BarChart data={breakdownData} margin={{ top: 8, right: 8, left: -18, bottom: 8 }}>
+                    <CartesianGrid vertical={false} strokeDasharray="3 3" />
+                    <XAxis
+                      dataKey="name"
+                      tickLine={false}
+                      axisLine={false}
+                      interval={0}
+                      tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 11 }}
+                    />
+                    <YAxis
+                      tickLine={false}
+                      axisLine={false}
+                      width={32}
+                      domain={[0, breakdownMax]}
+                      allowDecimals={false}
+                      tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 11 }}
+                    />
+                    <ChartTooltip
+                      content={<ChartTooltipContent formatter={(value) => [`${value} pts`, 'Points']} />}
+                    />
+                    <Bar dataKey="value" minPointSize={6} fill="var(--color-value)" radius={8} />
+                  </BarChart>
+                </ChartContainer>
+              ) : (
+                <div className="flex h-full items-center justify-center rounded-lg border border-dashed border-border/70 bg-background/30 px-4 text-center text-sm text-muted-foreground">
+                  No score contribution data was stored for this scan.
+                </div>
+              )}
+            </div>
+          </div>
+          <div className="rounded-lg border border-border bg-secondary/30 p-4">
+            <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">
+              Step-by-Step Reasoning
+            </h4>
+            <div className="space-y-2 text-sm">
+              {(explanation.reasoningSteps || []).length > 0 ? (
+                explanation.reasoningSteps!.map((step, index) => (
+                  <div key={index} className="flex gap-3">
+                    <span className="text-primary font-mono">{index + 1}.</span>
+                    <span>{step}</span>
+                  </div>
+                ))
+              ) : (
+                <p className="text-muted-foreground">No reasoning steps available.</p>
+              )}
             </div>
           </div>
         </div>

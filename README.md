@@ -5,9 +5,14 @@ SecureAgent is a multi-user browser security platform for detecting malicious we
 It combines:
 - FastAPI backend threat analysis and policy enforcement
 - Chrome extension for page scanning and action interception
+- Selenium-backed browser runtime analysis with HTTP fallback
+- Multi-step protected browser-agent execution with replanning and per-step mediation
 - React dashboard with authenticated, user-scoped visibility
 - Firebase Firestore storage and real-time listeners
 - Safe malicious simulation lab for local attack testing
+- Reproducible benchmark fixtures and evaluation reporting
+- Stress-suite reporting and exportable metrics tables
+- Hardened backend defaults with docs disabled, user-scoped data, and private-host scan blocking
 
 ---
 
@@ -74,6 +79,44 @@ Every scan carries:
 - key findings
 - policy decision
 - signal severity and confidence
+- score breakdown and ordered reasoning steps
+
+### Browser-Backed Dynamic Analysis
+
+SecureAgent can now enrich scans with a real browser runtime when Chrome/Selenium is available:
+- dynamic DOM mutation monitoring
+- runtime overlay and clickjacking inspection
+- event hijack detection
+- cross-origin request visibility
+
+If a browser runtime is unavailable, the system falls back to HTTP fetching so the prototype still runs.
+
+### Benchmark and Evaluation Evidence
+
+The platform now includes:
+- an expanded labeled benchmark corpus for benign and malicious pages
+- local malicious simulator pages
+- reproducible benchmark report API at `GET /benchmark/report`
+- stress-suite API at `GET /benchmark/stress`
+- export API at `POST /benchmark/export`
+- dashboard benchmark panel with:
+  - precision
+  - recall
+  - F1 score
+  - false positive rate
+  - benign task success rate
+  - malicious task stop rate
+  - latency summary
+
+### Protected Autonomous Agent Execution
+
+SecureAgent now exposes `POST /agent/execute`, which:
+- perceives current browser state
+- extracts actionable elements and sensitive inputs
+- replans at each step from the user goal
+- scans the page before every action
+- mediates each click or text entry
+- halts on policy blocks, execution failures, or goal conflicts
 
 ### User-Scoped Dashboard
 
@@ -99,6 +142,15 @@ Backend role checks now protect:
 - `GET /admin/all_scans` for `admin`
 - `GET /research/analytics` for `admin` and `researcher`
 - standard user routes for user-owned data only
+
+### Hardening Defaults
+
+The current backend defaults are intentionally closed down:
+- Swagger/OpenAPI docs are disabled unless `SECUREAGENT_EXPOSE_API_DOCS=true`
+- remote scans of private or loopback hosts are blocked by default
+- the simulator lab is mounted only when `SECUREAGENT_ENABLE_LOCAL_LAB=true`
+- JWT secrets must be explicitly configured in production/staging
+- local auth storage starts empty and is safe to regenerate
 
 ---
 
@@ -149,14 +201,13 @@ Secure-Agent-Browser/
 │       ├── obfuscated-payload.html
 │       └── combined-threat.html
 │
-└── attacks/
 ```
 
 ---
 
 ## Backend API
 
-Base URL: `http://localhost:8000`
+Base URL: `http://127.0.0.1:8000`
 
 ### Auth
 
@@ -247,6 +298,18 @@ Evaluates an AI/browser agent action before execution.
 }
 ```
 
+#### `POST /agent/execute`
+
+Runs the protected multi-step browser-agent executor against a target page.
+
+#### `GET /benchmark/stress`
+
+Returns large-page handling and latency stress results.
+
+#### `POST /benchmark/export`
+
+Exports JSON, CSV, and Markdown benchmark artifacts into `benchmark-results/latest/`.
+
 ### User Data
 
 #### `GET /scans/my`
@@ -254,6 +317,22 @@ Evaluates an AI/browser agent action before execution.
 #### `GET /action_history`
 
 All three are authenticated and user-scoped.
+
+### Public Surface
+
+Public by default:
+- `GET /health`
+- `POST /auth/register`
+- `POST /auth/login`
+- `POST /auth/google`
+
+Protected:
+- all scan, action, metrics, performance, history, admin, and research endpoints
+
+Disabled by default:
+- `/docs`
+- `/redoc`
+- `/openapi.json`
 
 ### Restricted Routes
 
@@ -328,6 +407,8 @@ Dashboard behavior:
 - real-time Firestore listeners for `scans` and `agent_actions`
 - backend polling fallback for `/scans/my` and `/action_history`
 - user-specific records only
+- shared API client for backend-origin requests
+- runtime API base URL persisted for extension reuse
 
 ---
 
@@ -342,12 +423,14 @@ Behavior:
 - sends actions to `/evaluate_action`
 - includes the JWT in all protected backend requests
 - blocks risky agent actions before execution
+- reuses the dashboard-selected backend base URL instead of assuming a single hardcoded host
 
 Token flow:
 - dashboard login stores JWT in local storage
 - dashboard posts the token to the page via `window.postMessage`
 - content script stores the token in `chrome.storage.local`
 - background/content scripts reuse the token for scans and action mediation
+- the frontend also persists `secureagent_api_base_url`, which the extension reads for backend calls
 
 ---
 
@@ -355,18 +438,19 @@ Token flow:
 
 Folder: `malicious-simulator-lab/`
 
-Run locally:
+The lab is already served by the backend at `/lab` when `SECUREAGENT_ENABLE_LOCAL_LAB=true`.
+
+Open locally:
 
 ```bash
-cd malicious-simulator-lab
-python3 -m http.server 8099
+http://127.0.0.1:8000/lab
 ```
 
 Test URLs:
-- `http://localhost:8099/pages/phishing-login.html`
-- `http://localhost:8099/pages/prompt-injection.html`
-- `http://localhost:8099/pages/obfuscated-payload.html`
-- `http://localhost:8099/pages/combined-threat.html`
+- `http://127.0.0.1:8000/lab/pages/phishing-login.html`
+- `http://127.0.0.1:8000/lab/pages/prompt-injection.html`
+- `http://127.0.0.1:8000/lab/pages/obfuscated-payload.html`
+- `http://127.0.0.1:8000/lab/pages/combined-threat.html`
 
 Each scenario includes a local agent simulator panel to test mediated actions through the real extension/backend flow.
 
@@ -381,15 +465,20 @@ From repo root:
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-pip install fastapi uvicorn requests tldextract pyyaml scikit-learn firebase-admin python-jose bcrypt
-uvicorn backend.api:app --reload --host 0.0.0.0 --port 8000
+pip install -r backend/requirements.txt
+uvicorn backend.api:app --reload --host 127.0.0.1 --port 8000
 ```
 
 Recommended env vars:
 
 ```bash
+export SECUREAGENT_ENV=development
 export SECUREAGENT_JWT_SECRET="replace-this-with-a-long-random-secret"
 export SECUREAGENT_CORS_ORIGINS="http://localhost:8080,http://127.0.0.1:8080"
+export SECUREAGENT_FIREBASE_CREDENTIALS="./backend/firebase_key.json"
+export SECUREAGENT_ENABLE_LOCAL_LAB=true
+export SECUREAGENT_EXPOSE_API_DOCS=false
+export SECUREAGENT_ALLOW_PRIVATE_SCAN_TARGETS=false
 ```
 
 ### 2. Frontend
@@ -403,7 +492,14 @@ npm run dev
 Optional:
 
 ```bash
-export VITE_API_BASE_URL=http://localhost:8000
+export VITE_API_BASE_URL=http://127.0.0.1:8000
+export VITE_FIREBASE_API_KEY="..."
+export VITE_FIREBASE_AUTH_DOMAIN="..."
+export VITE_FIREBASE_PROJECT_ID="..."
+export VITE_FIREBASE_STORAGE_BUCKET="..."
+export VITE_FIREBASE_MESSAGING_SENDER_ID="..."
+export VITE_FIREBASE_APP_ID="..."
+export VITE_FIREBASE_MEASUREMENT_ID="..."
 ```
 
 ### 3. Extension
@@ -421,6 +517,53 @@ In Firebase Console for project `agent-browser-366c1`:
 - set a support email
 - add `localhost` to Authorized Domains
 
+### 5. Optional API Docs
+
+If you explicitly want Swagger during local development:
+
+```bash
+export SECUREAGENT_EXPOSE_API_DOCS=true
+uvicorn backend.api:app --reload --host 127.0.0.1 --port 8000
+```
+
+Then open `http://127.0.0.1:8000/docs`.
+
+### 6. Verification
+
+Backend:
+
+```bash
+python3 -m compileall backend
+cd backend && python3 test_startup.py
+```
+
+Frontend:
+
+```bash
+cd Frontend/Secure-Agent-Browser
+npm run lint
+npm run build
+npm test -- --run
+```
+
+### 7. One-Command Evaluation
+
+Generate benchmark and stress artifacts:
+
+```bash
+python3 scripts/run_benchmark.py
+```
+
+Generate the hackathon-ready package plus demo notes:
+
+```bash
+python3 scripts/competition_mode.py
+```
+
+Outputs land in:
+- `benchmark-results/latest/`
+- `benchmark-results/<timestamp>/`
+
 ---
 
 ## Firestore Indexes
@@ -433,21 +576,43 @@ The backend now falls back to a non-indexed query plus local sorting if those in
 
 ---
 
+## Submission Package
+
+For judging and final submission, include:
+- [README.md](/Users/mac/Desktop/Secure-Agent-Browser/README.md)
+- [TECHNICAL_DOCUMENTATION.md](/Users/mac/Desktop/Secure-Agent-Browser/TECHNICAL_DOCUMENTATION.md)
+- [docs/ARCHITECTURE_DIAGRAM.md](/Users/mac/Desktop/Secure-Agent-Browser/docs/ARCHITECTURE_DIAGRAM.md)
+- [docs/DEMO_FLOW.md](/Users/mac/Desktop/Secure-Agent-Browser/docs/DEMO_FLOW.md)
+- `benchmark-results/latest/SUMMARY.md`
+- `benchmark-results/latest/benchmark-report.json`
+
+---
+
 ## Troubleshooting
 
 - Registration returns `500`:
   - restart the backend after dependency or auth changes
   - current auth path uses direct `bcrypt`, not `passlib`
+  - confirm `SECUREAGENT_JWT_SECRET` is set in non-dev deployments
 
 - Dashboard is blank:
   - confirm you are logged in
   - confirm the extension is sending authenticated requests
   - confirm backend `/scans/my` and `/action_history` are returning `200`
   - create the Firestore composite indexes for production
+  - verify `VITE_API_BASE_URL` points at the running backend
 
 - Google login fails with `auth/configuration-not-found`:
   - enable Google sign-in in Firebase Authentication
   - add `localhost` to Authorized Domains
+
+- Scan requests fail for `localhost`, Docker, or private IPs:
+  - this is blocked by default to reduce SSRF exposure
+  - only enable `SECUREAGENT_ALLOW_PRIVATE_SCAN_TARGETS=true` in a controlled local environment
+
+- API docs are missing:
+  - expected by default
+  - set `SECUREAGENT_EXPOSE_API_DOCS=true` only for local development
 
 - Extension changes do not appear:
   - reload the unpacked extension in `chrome://extensions`

@@ -5,9 +5,10 @@ from __future__ import annotations
 from typing import Any, Dict, List, Tuple
 
 WEIGHTS = {
-    "ml_score": 0.40,
-    "dom_suspicion_score": 0.30,
-    "obfuscation_score": 0.20,
+    "ml_score": 0.35,
+    "dom_suspicion_score": 0.25,
+    "ui_risk_score": 0.15,
+    "obfuscation_score": 0.15,
     "threat_intel_score": 0.10,
 }
 
@@ -70,6 +71,16 @@ def _signal_pressure(signals: List[Dict[str, Any]]) -> int:
             base = 35
         elif signal_type in {"credential_request", "phishing_intent"}:
             base = 24
+        elif signal_type in {
+            "misleading_forms",
+            "hidden_overlays",
+            "clickjacking_iframe",
+            "opacity_clickjacking",
+            "invisible_clickable_area",
+        }:
+            base = 18
+        elif signal_type in {"fake_buttons", "overlapping_elements", "z_index_abuse"}:
+            base = 12
         elif signal_type in {"hidden_dom_element", "hex_payload"}:
             base = 12
         elif signal_type == "base64_blob":
@@ -98,6 +109,7 @@ def _apply_domain_trust_modifier(risk_percent: int, domain_trust: float) -> int:
 def calculate_weighted_risk(
     ml_score: float,
     dom_suspicion_score: float,
+    ui_risk_score: float,
     obfuscation_score: float,
     threat_intel_score: float,
     *,
@@ -110,6 +122,7 @@ def calculate_weighted_risk(
     """
     ml_score = _clamp01(ml_score)
     dom_suspicion_score = _clamp01(dom_suspicion_score)
+    ui_risk_score = _clamp01(ui_risk_score)
     obfuscation_score = _clamp01(obfuscation_score)
     threat_intel_score = _clamp01(threat_intel_score)
     signal_details = list(signals or [])
@@ -117,6 +130,7 @@ def calculate_weighted_risk(
     weighted = (
         WEIGHTS["ml_score"] * ml_score
         + WEIGHTS["dom_suspicion_score"] * dom_suspicion_score
+        + WEIGHTS["ui_risk_score"] * ui_risk_score
         + WEIGHTS["obfuscation_score"] * obfuscation_score
         + WEIGHTS["threat_intel_score"] * threat_intel_score
     )
@@ -134,6 +148,7 @@ def calculate_weighted_risk(
         "breakdown": {
             "ml_score": round(ml_score, 4),
             "dom_suspicion_score": round(dom_suspicion_score, 4),
+            "ui_risk_score": round(ui_risk_score, 4),
             "obfuscation_score": round(obfuscation_score, 4),
             "threat_intel_score": round(threat_intel_score, 4),
             "weighted_percent": weighted_percent,
@@ -150,12 +165,13 @@ def _legacy_to_weighted_inputs(
     ml_result: Any,
     llm_result: Any,
     behavior_risk: float = 0,
-) -> Tuple[float, float, float, float, List[Dict[str, Any]], List[str]]:
+) -> Tuple[float, float, float, float, float, List[Dict[str, Any]], List[str]]:
     reasons: List[str] = []
     signals: List[Dict[str, Any]] = []
 
     ml_score = 1.0 if bool(ml_result) else 0.0
     dom_suspicion_score = 0.7 if bool(phishing) else 0.0
+    ui_risk_score = 0.0
     obfuscation_score = 0.0
     threat_intel_score = 1.0 if bool(llm_result) else 0.0
 
@@ -167,6 +183,7 @@ def _legacy_to_weighted_inputs(
         reasons.append("Prompt-injection indicators detected")
     if hidden_count:
         signals.append({"type": "hidden_dom_element", "confidence": "medium"})
+        ui_risk_score = 0.35
         obfuscation_score = 0.4
         reasons.append("Hidden/obfuscated UI elements detected")
     if phishing:
@@ -180,6 +197,7 @@ def _legacy_to_weighted_inputs(
     return (
         ml_score,
         dom_suspicion_score,
+        ui_risk_score,
         obfuscation_score,
         threat_intel_score,
         signals,
@@ -200,12 +218,13 @@ def calculate_risk(*args: Any, **kwargs: Any) -> Any:
         -> (risk_percent, reasons, confidence, decision)
     """
     legacy_kwarg_present = "behavior_risk" in kwargs or "behavior_findings" in kwargs
-    if len(args) == 4 and all(isinstance(v, (int, float)) for v in args):
+    if len(args) == 5 and all(isinstance(v, (int, float)) for v in args):
         return calculate_weighted_risk(
             ml_score=float(args[0]),
             dom_suspicion_score=float(args[1]),
-            obfuscation_score=float(args[2]),
-            threat_intel_score=float(args[3]),
+            ui_risk_score=float(args[2]),
+            obfuscation_score=float(args[3]),
+            threat_intel_score=float(args[4]),
             domain_trust=float(kwargs.get("domain_trust", 50.0)),
             signals=list(kwargs.get("signals", []) or []),
         )
@@ -223,6 +242,7 @@ def calculate_risk(*args: Any, **kwargs: Any) -> Any:
     (
         ml_score,
         dom_suspicion_score,
+        ui_risk_score,
         obfuscation_score,
         threat_intel_score,
         signals,
@@ -239,6 +259,7 @@ def calculate_risk(*args: Any, **kwargs: Any) -> Any:
     weighted = calculate_weighted_risk(
         ml_score=ml_score,
         dom_suspicion_score=dom_suspicion_score,
+        ui_risk_score=ui_risk_score,
         obfuscation_score=obfuscation_score,
         threat_intel_score=threat_intel_score,
         domain_trust=float(kwargs.get("domain_trust", 50.0)),

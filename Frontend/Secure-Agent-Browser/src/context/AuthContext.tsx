@@ -8,7 +8,7 @@ import {
 } from "react";
 import { signInWithPopup, signOut } from "firebase/auth";
 
-import { apiFetch } from "@/lib/api";
+import { apiFetch, readApiError } from "@/lib/api";
 import { auth as firebaseAuth, googleProvider } from "@/lib/firebase";
 
 export type AuthUser = {
@@ -16,6 +16,8 @@ export type AuthUser = {
   email: string;
   role: "user" | "admin" | "researcher";
   created_at: string;
+  auth_provider?: string;
+  has_password?: boolean;
 };
 
 type AuthContextValue = {
@@ -29,6 +31,7 @@ type AuthContextValue = {
     role?: "user" | "admin" | "researcher"
   ) => Promise<void>;
   loginWithGoogle: () => Promise<void>;
+  setPassword: (password: string) => Promise<void>;
   logout: () => void;
 };
 
@@ -119,21 +122,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setToken(nextToken);
     setUser(nextUser);
     persistSession(nextToken, nextUser);
-  };
-
-  const readApiError = async (response: Response, fallback: string) => {
-    try {
-      const payload = (await response.json()) as { detail?: string };
-      if (payload?.detail) return payload.detail;
-    } catch {
-      try {
-        const text = await response.text();
-        if (text) return text;
-      } catch {
-        // ignore secondary parse failures
-      }
-    }
-    return fallback;
   };
 
   const normalizeAuthError = (error: unknown, fallback: string) => {
@@ -228,6 +216,35 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const setPassword = async (password: string) => {
+    if (!token) {
+      throw new Error("You must be logged in to set a password.");
+    }
+
+    try {
+      const response = await apiFetch(
+        "/auth/set-password",
+        {
+          method: "POST",
+          body: JSON.stringify({ password }),
+        },
+        token
+      );
+
+      if (!response.ok) {
+        throw new Error(await readApiError(response, "Unable to set password"));
+      }
+
+      const payload = (await response.json()) as {
+        access_token: string;
+        user: AuthUser;
+      };
+      applyAuthResponse(payload.access_token, payload.user);
+    } catch (error) {
+      throw normalizeAuthError(error, "Unable to set password");
+    }
+  };
+
   const logout = () => {
     void signOut(firebaseAuth);
     clearSession();
@@ -237,7 +254,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   return (
     <AuthContext.Provider
-      value={{ user, token, ready, login, register, loginWithGoogle, logout }}
+      value={{ user, token, ready, login, register, loginWithGoogle, setPassword, logout }}
     >
       {children}
     </AuthContext.Provider>

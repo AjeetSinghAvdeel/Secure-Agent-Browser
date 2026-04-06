@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import { Link } from "react-router-dom";
 import { collection, onSnapshot, orderBy, query, where } from "firebase/firestore";
@@ -16,9 +16,12 @@ import Footer from "@/components/Footer";
 import RiskIntelligencePanel from "@/components/RiskIntelligencePanel";
 import ThreatTimeline from "@/components/ThreatTimeline";
 import ThreatAlert from "@/components/ThreatAlert";
+import PerformancePanel from "@/components/PerformancePanel";
+import BenchmarkPanel from "@/components/BenchmarkPanel";
 import { db } from "@/lib/firebase";
 import { useAuth } from "@/context/AuthContext";
 import { apiFetch } from "@/lib/api";
+import { toDateValue, type DateLike } from "@/lib/date";
 
 /* ---------------------------------- */
 /* UI CONFIG */
@@ -41,6 +44,11 @@ const statusConfig = {
     color: "text-cyber-warning",
     bg: "bg-cyber-warning/10 border-cyber-warning/30",
   },
+  confirmation: {
+    label: "CONFIRM",
+    color: "text-orange-300",
+    bg: "bg-orange-500/10 border-orange-400/30",
+  },
   blocked: {
     label: "BLOCKED",
     color: "text-cyber-danger",
@@ -49,12 +57,12 @@ const statusConfig = {
 };
 
 type StatusFilter = "all" | "safe" | "warning" | "blocked";
-type Decision = "ALLOW" | "WARN" | "BLOCK";
+type Decision = "ALLOW" | "WARN" | "BLOCK" | "REQUIRE_CONFIRMATION";
 
 type Scan = {
   id: string;
   url: string;
-  timestamp?: any;
+  timestamp?: DateLike;
   time?: string;
   risk: number;
   trust?: number;
@@ -63,9 +71,9 @@ type Scan = {
   analysisSummary?: string;
   status?: "safe" | "warning" | "blocked";
   decision?: Decision;
-  details?: any;
+  details?: Record<string, unknown>;
   policy?: {
-    decision: "ALLOW" | "WARN" | "BLOCK";
+    decision: Decision;
     reason: string;
   };
   actionType?: string;
@@ -80,7 +88,17 @@ type Scan = {
     summary?: string;
     key_findings?: string[];
     policy_decision?: Decision;
+    confidence_score?: number;
+    reasoning_steps?: string[];
   };
+  score_breakdown?: {
+    ml?: number;
+    domain?: number;
+    ui?: number;
+    obfuscation?: number;
+  };
+  reasoning_steps?: string[];
+  confidence_score?: number;
   agent_action?: {
     type: string;
     fields?: string[];
@@ -98,12 +116,63 @@ type ActionAudit = {
   risk: number;
   attack_type?: string;
   page_decision?: Decision;
-  timestamp?: any;
+  timestamp?: DateLike;
   action_context?: {
     source?: string;
     target_text?: string;
     input_type?: string;
   };
+};
+
+type PerformanceSummary = {
+  avg_latency_ms: number;
+  max_latency_ms: number;
+  breakdown: {
+    dom: number;
+    ml: number;
+    policy: number;
+  };
+  per_action_overhead_ms?: Record<string, { avg: number; max: number }>;
+  recent_samples?: Array<{
+    action: string;
+    pipeline_ms: number;
+    dom_ms: number;
+    ml_ms: number;
+    policy_ms: number;
+  }>;
+};
+
+type ScanDetails = {
+  reasons?: string[];
+  signal_details?: Array<{
+    type?: string;
+    name?: string;
+    severity?: string;
+    confidence?: string;
+  }>;
+  analysis?: Scan["analysis"];
+  summary?: string;
+  attack_type?: string;
+};
+
+const resolveScoreBreakdown = (scan: Scan, details: ScanDetails) => {
+  const candidates = [
+    scan.score_breakdown,
+    scan.analysis?.score_breakdown as Scan["score_breakdown"] | undefined,
+    (details.analysis as (Scan["analysis"] & { score_breakdown?: Scan["score_breakdown"] }) | undefined)
+      ?.score_breakdown,
+    (scan.details as { score_breakdown?: Scan["score_breakdown"] } | undefined)?.score_breakdown,
+  ];
+
+  for (const candidate of candidates) {
+    if (!candidate) continue;
+    const hasValue = Object.values(candidate).some((value) => Number(value ?? 0) > 0);
+    if (hasValue) {
+      return candidate;
+    }
+  }
+
+  return candidates.find(Boolean) || {};
 };
 
 const calculateDomainTrustFallback = (url: string): number => {
@@ -150,6 +219,81 @@ const calculateDomainTrustFallback = (url: string): number => {
   }
 };
 
+const compactLabelClass =
+  "text-[10px] uppercase tracking-[0.18em] text-muted-foreground font-mono";
+
+type AnimatedListProps = {
+  itemCount: number;
+  maxHeight?: string;
+  className?: string;
+  getKey: (index: number) => string;
+  renderItem: (index: number) => JSX.Element;
+};
+
+const AnimatedList = ({
+  itemCount,
+  maxHeight = "max-h-[30rem]",
+  className = "",
+  getKey,
+  renderItem,
+}: AnimatedListProps) => {
+  const listRef = useRef<HTMLDivElement | null>(null);
+  const [topFade, setTopFade] = useState(0);
+  const [bottomFade, setBottomFade] = useState(1);
+
+  useEffect(() => {
+    const node = listRef.current;
+    if (!node) return;
+
+    const updateFades = () => {
+      const { scrollTop, scrollHeight, clientHeight } = node;
+      setTopFade(Math.min(scrollTop / 36, 1));
+      const remaining = scrollHeight - (scrollTop + clientHeight);
+      setBottomFade(scrollHeight <= clientHeight ? 0 : Math.min(remaining / 36, 1));
+    };
+
+    updateFades();
+    node.addEventListener("scroll", updateFades);
+    window.addEventListener("resize", updateFades);
+
+    return () => {
+      node.removeEventListener("scroll", updateFades);
+      window.removeEventListener("resize", updateFades);
+    };
+  }, [itemCount]);
+
+  return (
+    <div className={`relative ${className}`}>
+      <div
+        ref={listRef}
+        className={`dashboard-scroll-list space-y-2 overflow-y-auto pr-1 ${maxHeight}`}
+      >
+        {Array.from({ length: itemCount }, (_, index) => (
+          <motion.div
+            key={getKey(index)}
+            initial={{ opacity: 0, y: 14, scale: 0.98 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            transition={{ duration: 0.22, delay: Math.min(index * 0.04, 0.2) }}
+          >
+            {renderItem(index)}
+          </motion.div>
+        ))}
+      </div>
+
+      <div
+        aria-hidden="true"
+        className="dashboard-list-fade-top pointer-events-none absolute inset-x-0 top-0 h-10"
+        style={{ opacity: topFade }}
+      />
+      <div
+        aria-hidden="true"
+        className="dashboard-list-fade-bottom pointer-events-none absolute inset-x-0 bottom-0 h-12"
+        style={{ opacity: bottomFade }}
+      />
+    </div>
+  );
+};
+
 /* ---------------------------------- */
 /* DASHBOARD */
 /* ---------------------------------- */
@@ -159,28 +303,58 @@ const Dashboard = () => {
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [expandedScan, setExpandedScan] = useState<string | null>(null);
+  const [expandedAudit, setExpandedAudit] = useState<string | null>(null);
   const [scanHistory, setScanHistory] = useState<Scan[]>([]);
   const [latestThreat, setLatestThreat] = useState<Scan | null>(null);
   const [actionAudits, setActionAudits] = useState<ActionAudit[]>([]);
+  const [performance, setPerformance] = useState<PerformanceSummary | null>(null);
 
-  const formatTime = (ts: any) => {
-    if (ts?.toDate) return ts.toDate().toLocaleString();
-    if (ts instanceof Date) return ts.toLocaleString();
-    if (typeof ts === "string" || typeof ts === "number") {
-      const parsed = new Date(ts);
-      if (!Number.isNaN(parsed.getTime())) return parsed.toLocaleString();
-    }
-    return "--";
+  const formatDateTime = (ts: DateLike) => {
+    const date = toDateValue(ts);
+    if (!date) return "--";
+    return date.toLocaleString([], {
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: false,
+    });
+  };
+
+  const formatShortDateTime = (ts: DateLike) => {
+    const date = toDateValue(ts);
+    if (!date) return "--";
+    return date.toLocaleString([], {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    });
+  };
+
+  const formatTime = (ts: DateLike) => {
+    const date = toDateValue(ts);
+    return date ? date.toLocaleString() : "--";
   };
 
   const scanDecision = (scan: Scan): Decision => {
-    if (scan.decision === "ALLOW" || scan.decision === "WARN" || scan.decision === "BLOCK") {
+    if (
+      scan.decision === "ALLOW" ||
+      scan.decision === "WARN" ||
+      scan.decision === "BLOCK" ||
+      scan.decision === "REQUIRE_CONFIRMATION"
+    ) {
       return scan.decision;
     }
     if (
       scan.policy?.decision === "ALLOW" ||
       scan.policy?.decision === "WARN" ||
-      scan.policy?.decision === "BLOCK"
+      scan.policy?.decision === "BLOCK" ||
+      scan.policy?.decision === "REQUIRE_CONFIRMATION"
     ) {
       return scan.policy.decision;
     }
@@ -240,7 +414,7 @@ const Dashboard = () => {
   const warnCount = scanHistory.filter((s) => scanStatus(s) === "warning").length;
   const blockCount = scanHistory.filter((s) => scanStatus(s) === "blocked").length;
 
-  const applyScans = (scans: Scan[]) => {
+  const applyScans = useCallback((scans: Scan[]) => {
     const sorted = [...scans].sort((a, b) => scanTimeMs(b) - scanTimeMs(a));
     setScanHistory(sorted);
 
@@ -250,9 +424,9 @@ const Dashboard = () => {
     } else {
       setLatestThreat(null);
     }
-  };
+  }, []);
 
-  const loadBackendScans = async () => {
+  const loadBackendScans = useCallback(async () => {
     if (!token) return;
 
     const response = await apiFetch(
@@ -264,7 +438,8 @@ const Dashboard = () => {
     );
 
     if (response.status === 401) {
-      logout();
+      setScanHistory([]);
+      setLatestThreat(null);
       return;
     }
 
@@ -274,9 +449,9 @@ const Dashboard = () => {
 
     const payload = (await response.json()) as { scans?: Scan[] };
     applyScans(Array.isArray(payload.scans) ? payload.scans : []);
-  };
+  }, [applyScans, token]);
 
-  const loadBackendActions = async () => {
+  const loadBackendActions = useCallback(async () => {
     if (!token) return;
 
     const response = await apiFetch(
@@ -288,7 +463,7 @@ const Dashboard = () => {
     );
 
     if (response.status === 401) {
-      logout();
+      setActionAudits([]);
       return;
     }
 
@@ -298,7 +473,31 @@ const Dashboard = () => {
 
     const payload = (await response.json()) as { actions?: ActionAudit[] };
     setActionAudits(Array.isArray(payload.actions) ? payload.actions : []);
-  };
+  }, [token]);
+
+  const loadPerformance = useCallback(async () => {
+    if (!token) return;
+
+    const response = await apiFetch(
+      "/performance",
+      {
+        method: "GET",
+      },
+      token
+    );
+
+    if (response.status === 401) {
+      setPerformance(null);
+      return;
+    }
+
+    if (!response.ok) {
+      throw new Error(`Performance fetch failed: ${response.status}`);
+    }
+
+    const payload = (await response.json()) as PerformanceSummary;
+    setPerformance(payload);
+  }, [token]);
 
   useEffect(() => {
     if (!user?.id || !token) {
@@ -308,8 +507,10 @@ const Dashboard = () => {
     }
 
     void loadBackendScans();
+    void loadPerformance();
     const pollId = window.setInterval(() => {
       void loadBackendScans();
+      void loadPerformance();
     }, 3000);
 
     const unsubscribe = onSnapshot(
@@ -334,7 +535,7 @@ const Dashboard = () => {
       window.clearInterval(pollId);
       unsubscribe();
     };
-  }, [user?.id, token]);
+  }, [applyScans, loadBackendScans, loadPerformance, token, user?.id]);
 
   useEffect(() => {
     if (!user?.id || !token) {
@@ -366,17 +567,31 @@ const Dashboard = () => {
       window.clearInterval(pollId);
       unsubscribe();
     };
-  }, [user?.id, token]);
+  }, [loadBackendActions, token, user?.id]);
 
-  const actionDecisionCount = (decision: Decision) =>
-    actionAudits
+  const visibleActionAudits = actionAudits.filter((entry) => {
+    const targetText = String(entry.action_context?.target_text || "").trim().toLowerCase();
+    return !["dismiss", "continue anyway", "acknowledge warning"].includes(targetText);
+  });
+
+  const visibleActionDecisionCount = (decision: Decision) =>
+    visibleActionAudits
       .filter((entry) => entry.decision === decision)
       .reduce((total, entry) => total + (entry.count || 1), 0);
 
-  const totalActionEvents = actionAudits.reduce(
+  const totalVisibleActionEvents = visibleActionAudits.reduce(
     (total, entry) => total + (entry.count || 1),
     0
   );
+
+  const getDecisionStatus = (decision: Decision) =>
+    decision === "ALLOW"
+      ? statusConfig.safe
+      : decision === "REQUIRE_CONFIRMATION"
+      ? statusConfig.confirmation
+      : decision === "BLOCK"
+      ? statusConfig.blocked
+      : statusConfig.warning;
 
   return (
     <div className="min-h-screen bg-background">
@@ -405,19 +620,22 @@ const Dashboard = () => {
             <ThreatTimeline scans={scanHistory} />
           </div>
 
+          <PerformancePanel performance={performance} />
+          <BenchmarkPanel />
+
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
             <div className="glass rounded-xl p-5">
               <p className="text-xs text-muted-foreground font-mono mb-1">
                 Agent Actions Audited
               </p>
-              <p className="text-3xl font-bold font-mono">{totalActionEvents}</p>
+              <p className="text-3xl font-bold font-mono">{totalVisibleActionEvents}</p>
             </div>
             <div className="glass rounded-xl p-5">
               <p className="text-xs text-muted-foreground font-mono mb-1">
                 Allowed Actions
               </p>
               <p className="text-3xl font-bold font-mono text-cyber-safe">
-                {actionDecisionCount("ALLOW")}
+                {visibleActionDecisionCount("ALLOW")}
               </p>
             </div>
             <div className="glass rounded-xl p-5">
@@ -425,7 +643,7 @@ const Dashboard = () => {
                 Stopped / Warned
               </p>
               <p className="text-3xl font-bold font-mono text-cyber-danger">
-                {actionDecisionCount("BLOCK") + actionDecisionCount("WARN")}
+                {visibleActionDecisionCount("BLOCK") + visibleActionDecisionCount("WARN")}
               </p>
             </div>
           </div>
@@ -466,156 +684,231 @@ const Dashboard = () => {
             )}
           </div>
 
-          <div className="glass rounded-xl overflow-hidden overflow-x-auto mb-8">
-            <div className="px-6 py-4 border-b">
-              <h2 className="text-lg font-semibold">Agent Action Audit Trail</h2>
-              <p className="text-xs text-muted-foreground font-mono mt-1">
+          <div className="glass rounded-xl overflow-hidden mb-8">
+            <div className="border-b px-5 py-3">
+              <h2 className="text-base font-semibold">Agent Action Audit Trail</h2>
+              <p className="mt-1 text-[11px] text-muted-foreground font-mono">
                 Every mediated action is logged here, including approvals.
               </p>
             </div>
-            <table className="w-full text-sm table-fixed">
-              <thead>
-                <tr className="border-b text-xs font-mono text-muted-foreground">
-                  <th className="px-6 py-3 text-left">Time</th>
-                  <th className="px-4 py-3 text-left">Action</th>
-                  <th className="px-4 py-3 text-left">Target</th>
-                  <th className="px-4 py-3 text-left">Decision</th>
-                  <th className="px-4 py-3 text-left">Attack</th>
-                  <th className="px-4 py-3 text-left">Reason</th>
-                </tr>
-              </thead>
-              <tbody>
-                {actionAudits.length === 0 ? (
-                  <tr>
-                    <td colSpan={6} className="px-6 py-6 text-sm text-muted-foreground">
-                      No action audits yet.
-                    </td>
-                  </tr>
-                ) : (
-                  actionAudits.map((entry, index) => {
+            {visibleActionAudits.length === 0 ? (
+              <div className="px-5 py-5 text-sm text-muted-foreground">
+                No action audits yet.
+              </div>
+            ) : (
+              <div className="p-4">
+                <AnimatedList
+                  itemCount={visibleActionAudits.length}
+                  maxHeight="max-h-[34rem]"
+                  getKey={(index) => {
+                    const entry = visibleActionAudits[index];
+                    return `${entry.timestamp || index}-${entry.action}-${entry.url}`;
+                  }}
+                  renderItem={(index) => {
+                    const entry = visibleActionAudits[index];
                     const decision = entry.decision;
-                    const status =
-                      decision === "ALLOW"
-                        ? statusConfig.safe
-                        : decision === "BLOCK"
-                        ? statusConfig.blocked
-                        : statusConfig.warning;
+                    const status = getDecisionStatus(decision);
+                    const auditId = `${entry.timestamp || index}-${entry.action}-${entry.url}`;
+                    const expanded = expandedAudit === auditId;
 
                     return (
-                      <tr key={`${entry.timestamp || index}-${entry.action}-${entry.url}`} className="border-b">
-                        <td className="px-6 py-3 text-xs font-mono">
-                          {formatTime(entry.timestamp)}
-                        </td>
-                        <td className="px-4 py-3 text-xs font-mono">
-                          {entry.action}
-                          {(entry.count || 1) > 1 ? ` x${entry.count}` : ""}
-                        </td>
-                        <td
-                          title={entry.url}
-                          className="px-4 py-3 text-xs font-mono break-all"
+                      <motion.div
+                        whileHover={{ scale: 1.01, borderColor: "hsl(var(--primary) / 0.28)" }}
+                        className="rounded-lg border border-border bg-background/25 px-3 py-2.5 transition-colors"
+                      >
+                        <button
+                          type="button"
+                          onClick={() => setExpandedAudit(expanded ? null : auditId)}
+                          className="w-full text-left"
                         >
-                          {entry.action_context?.target_text || entry.url}
-                        </td>
-                        <td className="px-4 py-3">
-                          <span
-                            className={`inline-flex items-center gap-1 text-xs font-mono px-2 py-1 rounded-full border ${status.bg} ${status.color}`}
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <p className="text-sm font-mono">{entry.action}</p>
+                                {(entry.count || 1) > 1 && (
+                                  <span className="rounded-full border border-border/80 px-1.5 py-0.5 text-[10px] font-mono text-muted-foreground">
+                                    x{entry.count}
+                                  </span>
+                                )}
+                              </div>
+                              <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] font-mono text-muted-foreground">
+                                <span>{formatDateTime(entry.timestamp)}</span>
+                                <span className="text-border">•</span>
+                                <span>{entry.attack_type || entry.page_decision || "Unknown"}</span>
+                                <span className="text-border">•</span>
+                                <span className="truncate">{entry.action_context?.target_text || entry.url}</span>
+                              </div>
+                            </div>
+                            <div className="flex shrink-0 items-center gap-2">
+                              <span
+                                className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-mono ${status.bg} ${status.color}`}
+                              >
+                                {decision}
+                              </span>
+                              <span className="inline-flex items-center gap-1 text-xs font-mono text-primary">
+                                {expanded ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+                                {expanded ? "Hide" : "View"}
+                              </span>
+                            </div>
+                          </div>
+                        </button>
+
+                        {expanded && (
+                          <motion.div
+                            initial={{ opacity: 0, height: 0 }}
+                            animate={{ opacity: 1, height: "auto" }}
+                            transition={{ duration: 0.22 }}
+                            className="mt-3 overflow-hidden border-t border-border/70 pt-3"
                           >
-                            {decision}
-                          </span>
-                        </td>
-                        <td className="px-4 py-3 text-xs font-mono">
-                          {entry.attack_type || entry.page_decision || "Unknown"}
-                        </td>
-                        <td className="px-4 py-3 text-xs">{entry.reason}</td>
-                      </tr>
+                            <div className="grid gap-2 text-xs md:grid-cols-[minmax(0,1.5fr)_minmax(180px,0.8fr)]">
+                              <div className="min-w-0 rounded-md border border-border/60 bg-secondary/10 px-2.5 py-2">
+                                <p className={compactLabelClass}>Target</p>
+                                <p className="mt-1 font-mono leading-5 break-words">
+                                  {entry.action_context?.target_text || entry.url}
+                                </p>
+                              </div>
+                              <div className="rounded-md border border-border/60 bg-secondary/10 px-2.5 py-2">
+                                <p className={compactLabelClass}>Attack</p>
+                                <p className="mt-1 font-mono leading-5">
+                                  {entry.attack_type || entry.page_decision || "Unknown"}
+                                </p>
+                              </div>
+                            </div>
+
+                            <div className="mt-2 rounded-md border border-border/60 bg-secondary/10 px-2.5 py-2">
+                              <p className={compactLabelClass}>Reason</p>
+                              <p className="mt-1 text-sm leading-5 text-foreground/90">{entry.reason}</p>
+                            </div>
+                          </motion.div>
+                        )}
+                      </motion.div>
                     );
-                  })
-                )}
-              </tbody>
-            </table>
+                  }}
+                />
+              </div>
+            )}
           </div>
 
-          {/* Scan Table */}
-          <div className="glass rounded-xl overflow-hidden overflow-x-auto">
-            <table className="w-full text-sm table-fixed">
-              <thead>
-                <tr className="border-b text-xs font-mono text-muted-foreground">
-                  <th className="px-6 py-3 text-left">URL</th>
-                  <th className="px-4 py-3">Time</th>
-                  <th className="px-4 py-3 text-center">Risk</th>
-                  <th className="px-4 py-3 text-center">Status</th>
-                  <th className="px-4 py-3 text-center">Details</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.map((scan) => {
-                  const status = scanStatus(scan);
-                  const Icon = statusIcons[status];
-                  const cfg = statusConfig[status];
-                  const expanded = expandedScan === scan.id;
-                  const decision = scanDecision(scan);
-                  const indicators = Array.isArray(scan?.details?.reasons) ? scan.details.reasons : [];
-                  const signalDetails = Array.isArray(scan?.details?.signal_details) ? scan.details.signal_details : [];
-                  const analysis = scan.analysis || scan?.details?.analysis || {};
-                  const summary = String(scan.analysisSummary || scan?.details?.summary || "No explanation available.");
-                  const actionLog = scan.action_log;
-                  const attackType = String(scan.attack_type || scan?.details?.attack_type || "Unknown");
+          {/* Scan History */}
+          <div className="glass rounded-xl overflow-hidden">
+            <div className="border-b px-5 py-3">
+              <h2 className="text-base font-semibold">Scan History</h2>
+              <p className="mt-1 text-[11px] text-muted-foreground font-mono">
+                Recent records ordered by time, with expandable analysis details.
+              </p>
+            </div>
+            {filtered.length === 0 ? (
+              <div className="px-5 py-5 text-sm text-muted-foreground">
+                No scan history matches the current filters.
+              </div>
+            ) : (
+              <div className="p-4">
+                <AnimatedList
+                  itemCount={filtered.length}
+                  maxHeight="max-h-[42rem]"
+                  getKey={(index) => filtered[index].id}
+                  renderItem={(index) => {
+                    const scan = filtered[index];
+                    const status = scanStatus(scan);
+                    const Icon = statusIcons[status];
+                    const cfg = statusConfig[status];
+                    const expanded = expandedScan === scan.id;
+                    const decision = scanDecision(scan);
+                    const details = (scan.details || {}) as ScanDetails;
+                    const indicators = Array.isArray(details.reasons) ? details.reasons : [];
+                    const signalDetails = Array.isArray(details.signal_details) ? details.signal_details : [];
+                    const analysis = scan.analysis || details.analysis || {};
+                    const summary = String(
+                      scan.analysisSummary || details.summary || "No explanation available."
+                    );
+                    const actionLog = scan.action_log;
+                    const attackType = String(scan.attack_type || details.attack_type || "Unknown");
 
                   return (
-                    <Fragment key={scan.id}>
-                      <tr className="border-b">
-                        <td
-                          title={scan.url}
-                          className="px-6 py-3 font-mono text-xs max-w-[400px] break-all"
-                        >
-                          {scan.url}
-                        </td>
-                        <td className="px-4 py-3 text-xs font-mono">
-                          {scan.timestamp
-                            ? formatTime(scan.timestamp)
-                            : scan.time
-                            ? formatTime(scan.time)
-                            : "Unknown"}
-                        </td>
-                        <td className="px-4 py-3 text-center">
-                          <span className="font-mono">{scan.risk ?? 0}</span>
-                        </td>
-                        <td className="px-4 py-3 text-center">
-                          <span
-                            className={`inline-flex items-center gap-1 text-xs font-mono px-2 py-1 rounded-full border ${cfg.bg} ${cfg.color}`}
-                          >
-                            <Icon className="w-3 h-3" />
-                            {cfg.label}
-                          </span>
-                        </td>
-                        <td className="px-4 py-3 text-center">
-                          <button
-                            onClick={() => setExpandedScan(expanded ? null : scan.id)}
-                            className="text-xs font-mono text-primary flex items-center gap-1 mx-auto"
-                          >
-                            {expanded ? <ChevronUp /> : <ChevronDown />}
-                            {expanded ? "Hide" : "View"}
-                          </button>
-                        </td>
-                      </tr>
+                    <motion.div
+                      whileHover={{ scale: 1.008, borderColor: "hsl(var(--primary) / 0.28)" }}
+                      className="rounded-lg border border-border bg-background/25 px-3 py-2.5 transition-colors"
+                    >
+                      <button
+                        type="button"
+                        onClick={() => setExpandedScan(expanded ? null : scan.id)}
+                        className="w-full text-left"
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <p
+                              title={scan.url}
+                              className="font-mono text-xs leading-5 text-foreground break-all"
+                            >
+                              {scan.url}
+                            </p>
+                            <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] font-mono text-muted-foreground">
+                              <span>
+                                {scan.timestamp
+                                  ? formatDateTime(scan.timestamp)
+                                  : scan.time
+                                  ? formatDateTime(scan.time)
+                                  : "Unknown"}
+                              </span>
+                              <span className="text-border">•</span>
+                              <span>Risk {scan.risk ?? 0}</span>
+                              <span className="text-border">•</span>
+                              <span>{attackType}</span>
+                            </div>
+                          </div>
+
+                          <div className="flex shrink-0 items-center gap-2">
+                            <span
+                              className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-mono ${cfg.bg} ${cfg.color}`}
+                            >
+                              <Icon className="h-3 w-3" />
+                              {cfg.label}
+                            </span>
+                            <span className="inline-flex items-center gap-1 text-xs font-mono text-primary">
+                              {expanded ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+                              {expanded ? "Hide" : "View"}
+                            </span>
+                          </div>
+                        </div>
+                      </button>
 
                       {expanded && (
-                        <tr className="bg-secondary/20">
-                          <td colSpan={5} className="px-6 py-4 text-xs space-y-3">
-                            <div className="space-y-6">
+                        <motion.div
+                          initial={{ opacity: 0, height: 0 }}
+                          animate={{ opacity: 1, height: "auto" }}
+                          transition={{ duration: 0.22 }}
+                          className="mt-3 overflow-hidden border-t border-border/70 pt-3 text-xs"
+                        >
+                          <div className="space-y-4">
                               <RiskIntelligencePanel
                                 riskScore={Number(scan.risk ?? 0)}
                                 trustScore={resolveTrustScore(scan)}
                                 decision={decision}
-                                indicators={(signalDetails.length > 0 ? signalDetails : indicators.map((name: string) => ({
-                                  type: name,
-                                  severity: "low",
-                                  confidence: "low",
-                                }))).map((signal: any) => ({
+                                indicators={(
+                                  signalDetails.length > 0
+                                    ? signalDetails
+                                    : indicators.map((name) => ({
+                                        type: name,
+                                        severity: "low",
+                                        confidence: "low",
+                                      }))
+                                ).map((signal) => ({
                                   name: String(signal.type || signal.name || "unknown"),
                                   detected: true,
-                                  severity: signal.severity || "low",
-                                  confidence: signal.confidence || "low",
+                                  severity:
+                                    signal.severity === "critical" ||
+                                    signal.severity === "high" ||
+                                    signal.severity === "medium" ||
+                                    signal.severity === "low"
+                                      ? signal.severity
+                                      : "low",
+                                  confidence:
+                                    signal.confidence === "critical" ||
+                                    signal.confidence === "high" ||
+                                    signal.confidence === "medium" ||
+                                    signal.confidence === "low"
+                                      ? signal.confidence
+                                      : "low",
                                 }))}
                                 explanation={{
                                   summary: String(analysis.summary || summary),
@@ -623,14 +916,21 @@ const Dashboard = () => {
                                     ? analysis.key_findings
                                     : indicators,
                                   policyDecision: String(analysis.policy_decision || decision),
+                                  confidenceScore: Number(scan.confidence_score || analysis.confidence_score || 0),
+                                  reasoningSteps: Array.isArray(scan.reasoning_steps)
+                                    ? scan.reasoning_steps
+                                    : Array.isArray(analysis.reasoning_steps)
+                                    ? analysis.reasoning_steps
+                                    : [],
+                                  scoreBreakdown: resolveScoreBreakdown(scan, details),
                                 }}
                               />
                               {actionLog && (
-                                <div className="rounded-xl border border-cyber-danger/30 bg-cyber-danger/10 p-4">
-                                  <p className="font-mono mb-2">
+                                <div className="rounded-lg border border-cyber-danger/30 bg-cyber-danger/10 p-3">
+                                  <p className="mb-2 font-mono">
                                     <strong>Action Mediation Log:</strong>
                                   </p>
-                                  <div className="space-y-1 font-mono">
+                                  <div className="space-y-1 font-mono leading-5">
                                     <p>Action: {actionLog.actionType}</p>
                                     <p>Decision: {actionLog.decision}</p>
                                     <p>Reason: {actionLog.reason}</p>
@@ -639,10 +939,10 @@ const Dashboard = () => {
                                 </div>
                               )}
                               <div>
-                                <p className="font-mono mb-1">
+                                <p className="mb-1 font-mono">
                                   <strong>Analysis Reasons:</strong>
                                 </p>
-                                <ul className="list-disc pl-4 space-y-1">
+                                <ul className="list-disc space-y-1 pl-4 leading-5">
                                   {indicators.map(
                                     (r: string, i: number) => (
                                       <li key={i}>{r}</li>
@@ -650,16 +950,15 @@ const Dashboard = () => {
                                   )}
                                 </ul>
                               </div>
-                            </div>
-
-                          </td>
-                        </tr>
+                          </div>
+                        </motion.div>
                       )}
-                    </Fragment>
+                    </motion.div>
                   );
-                })}
-              </tbody>
-            </table>
+                  }}
+                />
+              </div>
+            )}
           </div>
 
         </div>

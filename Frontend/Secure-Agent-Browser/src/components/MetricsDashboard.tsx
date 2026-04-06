@@ -25,6 +25,7 @@ import {
   AlertCircle, TrendingUp, TrendingDown, 
   Shield, AlertTriangle, CheckCircle
 } from 'lucide-react';
+import { apiFetch, readApiError } from '@/lib/api';
 
 // Types
 interface Metrics {
@@ -80,20 +81,32 @@ interface TaskSuccessMetrics {
 // API calls
 const api = {
   getMetrics: async (): Promise<Metrics> => {
-    const res = await fetch('/metrics');
+    const token = window.localStorage.getItem("secureagent_token");
+    const res = await apiFetch('/metrics', { method: 'GET' }, token);
+    if (!res.ok) {
+      throw new Error(await readApiError(res, `Metrics request failed: ${res.status}`));
+    }
     return res.json();
   },
   
   getErrors: async (errorType?: string, limit: number = 20): Promise<Error[]> => {
+    const token = window.localStorage.getItem("secureagent_token");
     const params = new URLSearchParams({ limit: limit.toString() });
     if (errorType) params.set('error_type', errorType);
-    const res = await fetch(`/errors?${params}`);
+    const res = await apiFetch(`/errors?${params}`, { method: 'GET' }, token);
+    if (!res.ok) {
+      throw new Error(await readApiError(res, `Errors request failed: ${res.status}`));
+    }
     const data = await res.json();
     return data.errors;
   },
   
   getErrorAnalysis: async (): Promise<ErrorAnalysis> => {
-    const res = await fetch('/metrics/error-analysis');
+    const token = window.localStorage.getItem("secureagent_token");
+    const res = await apiFetch('/metrics/error-analysis', { method: 'GET' }, token);
+    if (!res.ok) {
+      throw new Error(await readApiError(res, `Error analysis request failed: ${res.status}`));
+    }
     return res.json();
   },
 };

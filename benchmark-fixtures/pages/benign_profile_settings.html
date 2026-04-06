@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Account Profile Settings</title>
+    <style>
+      body { font-family: Arial, sans-serif; background: #f5f7fb; color: #17304b; }
+      main { max-width: 760px; margin: 40px auto; background: #fff; padding: 32px; border-radius: 16px; }
+      .row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+      label { display: block; margin-bottom: 6px; font-weight: 600; }
+      input { width: 100%; padding: 12px; border: 1px solid #cbd5e1; border-radius: 10px; }
+      button { margin-top: 20px; padding: 12px 20px; border: 0; border-radius: 999px; background: #0f766e; color: #fff; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Profile Settings</h1>
+      <p>Manage your account details, recovery preferences, and login notifications.</p>
+      <div class="row">
+        <div>
+          <label for="display-name">Display name</label>
+          <input id="display-name" placeholder="Ajeet Singh" />
+        </div>
+        <div>
+          <label for="timezone">Timezone</label>
+          <input id="timezone" placeholder="Asia/Kolkata" />
+        </div>
+      </div>
+      <button type="button">Security</button>
+      <button type="button">Save Profile</button>
+    </main>
+  </body>
+</html>
